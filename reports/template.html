@@ -1,0 +1,30 @@
+<!-- TODO: this is a placeholder report template, not yet wired to any code. -->
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>HexWarden Analysis Report</title>
+</head>
+<body>
+    <h1>HexWarden Firmware Analysis Report</h1>
+    <p><strong>Firmware:</strong> {{ firmware_name }}</p>
+    <p><strong>Risk score:</strong> {{ risk_score }} / 100</p>
+    <p><strong>Verdict:</strong> {{ verdict }}</p>
+
+    <h2>Findings</h2>
+    <table border="1" cellpadding="4" cellspacing="0">
+        <thead>
+            <tr>
+                <th>Module</th>
+                <th>Severity</th>
+                <th>Offset</th>
+                <th>Description</th>
+                <th>Score</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- {{ findings_rows }} -->
+        </tbody>
+    </table>
+</body>
+</html>

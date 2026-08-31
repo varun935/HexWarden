@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Project specific
+tmp/
+output/
+*.img
+*.bin
+*.png
+*.json
+result.txt
+ses.txt
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*~

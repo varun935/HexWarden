@@ -1,0 +1,14 @@
+matplotlib==3.11.1
+numpy==1.26.4
+yara-python==4.5.1
+pyelftools==0.31
+scapy==2.5.0
+pytest==8.2.0
+
+# NOTE: binwalk is intentionally NOT pinned here. The only "binwalk"
+# package on PyPI (2.1.0) is a broken stub with no usable Python API on
+# modern Python, and the actively maintained binwalk (v3+) is a Rust CLI
+# with no Python bindings at all. modules/binwalk_wrapper.py detects this
+# at import time and modules/firmware_pipeline.py falls back to raw
+# entropy findings when Binwalk's Python API is unavailable -- see
+# docs/usage.md for details and options if you have a working install.
