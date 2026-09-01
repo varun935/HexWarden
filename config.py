@@ -251,6 +251,37 @@ MAGIC_HEADERS: dict = {
 }
 
 # --------------------------------------------------------------------------
+# Golden-image diff / Mode A (modules/golden_diff.py)
+#
+# Compares a suspect firmware against a known-clean golden reference.
+# Legitimate content (compression, binary blobs, crypto keys, ELF
+# sections) exists in both and cancels out in the diff, leaving only
+# genuinely injected or modified content -- near-zero false positives
+# when a reference is available, unlike the heuristic entropy pipeline.
+# --------------------------------------------------------------------------
+# Content-defined chunking (Layer 1): chunk boundaries are declared where
+# a rolling hash matches a mask pattern, not at fixed offsets, so an
+# insertion only affects the chunks immediately around it -- everything
+# downstream re-aligns naturally instead of every following byte shifting
+# and falsely appearing "changed".
+GOLDEN_TARGET_CHUNK_SIZE: int = 4096  # average chunk size, bytes
+GOLDEN_MIN_CHUNK_SIZE: int = 1024  # enforced floor, prevents pathologically tiny chunks
+GOLDEN_MAX_CHUNK_SIZE: int = 16384  # enforced ceiling, forces a cut if no boundary is found
+GOLDEN_ROLLING_HASH_WINDOW: int = 48  # rolling hash window, bytes
+
+# Entropy comparison (Layer 3): a chunk whose golden counterpart was below
+# this (code/data) but whose suspect content is above this (compressed/
+# encrypted) is the strongest injection signal this module produces.
+GOLDEN_LOW_ENTROPY_THRESHOLD: float = 6.5
+GOLDEN_HIGH_ENTROPY_THRESHOLD: float = 7.2
+
+# Confidence (severity rules, modules/golden_diff.py): golden-diff findings
+# start high-confidence because a clean reference removes most of the
+# ambiguity heuristic detection has to live with -- if it's not in the
+# golden image, it wasn't there originally.
+GOLDEN_DIFF_BASE_CONFIDENCE: float = 0.8
+
+# --------------------------------------------------------------------------
 # Logging
 # --------------------------------------------------------------------------
 LOG_FORMAT: str = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"

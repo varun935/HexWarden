@@ -9,6 +9,9 @@ explicit purpose.
 Inputs:
     Command-line arguments:
         --firmware PATH   Path to the firmware binary to analyze (required).
+        --golden PATH     Path to a known-clean reference firmware, for
+                           golden-image diff (optional; only used if
+                           "golden_diff" is in --modules).
         --output DIR      Directory to write reports/plots to (optional).
         --modules LIST    Comma-separated list of modules to enable (optional).
         --verbose         Enable debug-level logging (optional flag).
@@ -30,7 +33,7 @@ from typing import List, Optional, Sequence, Tuple
 
 import config
 from core import AnalysisError, Finding
-from modules import entropy, firmware_pipeline
+from modules import entropy, firmware_pipeline, golden_diff
 
 logger = logging.getLogger(__name__)
 
@@ -39,10 +42,14 @@ logger = logging.getLogger(__name__)
 # modules from config.ENABLED_MODULES are intentionally omitted until
 # they are built out. "pipeline" runs entropy plus recursive Binwalk
 # extraction; "entropy" remains available standalone for a raw-binary-only
-# scan with no extraction step.
+# scan with no extraction step. "golden_diff" is listed here for CLI
+# help/validation purposes only -- it takes (golden, suspect) rather than
+# a single firmware path, so `run()` special-cases its invocation instead
+# of calling it through the generic single-argument loop below.
 _AVAILABLE_MODULES = {
     "entropy": entropy.analyze,
     "pipeline": firmware_pipeline.run_pipeline,
+    "golden_diff": golden_diff.analyze_diff,
 }
 
 
@@ -65,6 +72,15 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--firmware", required=True, help="Path to the firmware binary to analyze."
+    )
+    parser.add_argument(
+        "--golden",
+        default=None,
+        help=(
+            "Path to a known-clean reference firmware image, for golden-image "
+            "diff (Mode A). Only used if 'golden_diff' is included in --modules; "
+            "if omitted, golden_diff is skipped."
+        ),
     )
     parser.add_argument(
         "--output",
@@ -160,6 +176,25 @@ def run(argv: Sequence[str]) -> int:
 
     all_findings: List[Finding] = []
     for module_name in module_names:
+        if module_name == "golden_diff":
+            if not args.golden:
+                logger.info(
+                    "No golden reference provided (--golden) — skipping golden-image "
+                    "diff, using heuristic pipeline only."
+                )
+                continue
+            logger.info("Running module: golden_diff")
+            try:
+                findings = golden_diff.analyze_diff(args.golden, str(firmware_path))
+            except FileNotFoundError as exc:
+                logger.error("%s", exc)
+                return 1
+            except AnalysisError as exc:
+                logger.error("Module 'golden_diff' failed: %s", exc)
+                continue
+            all_findings.extend(findings)
+            continue
+
         analyze_fn = _AVAILABLE_MODULES[module_name]
         logger.info("Running module: %s", module_name)
         try:
