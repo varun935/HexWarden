@@ -497,3 +497,53 @@ def test_original_firmware_untouched_after_pipeline(
 
     assert firmware_path.exists()
     assert hashlib.sha256(firmware_path.read_bytes()).hexdigest() == original_hash
+
+
+def test_filesystem_findings_merge_into_pipeline_and_cleanup_still_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """filesystem.py's checks run automatically on the pipeline's own extraction.
+
+    Reuses the same extraction already on disk (no second extraction) --
+    plants a backdoor-account passwd file under the mocked extracted
+    directory, confirms a module_name="filesystem" finding merges into
+    run_pipeline()'s combined output, and confirms the mandatory cleanup
+    still removes the extracted directory afterward even though
+    filesystem.py contributed findings.
+
+    Args:
+        tmp_path: Pytest-provided temporary directory.
+        monkeypatch: Pytest fixture used to stub Binwalk's extraction/scan
+            and redirect plot output.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If no filesystem finding is produced, or the
+            extracted directory survives cleanup.
+    """
+    monkeypatch.setattr(config, "DEFAULT_OUTPUT_DIR", tmp_path / "output")
+    # _walk_extracted() also runs against this same directory; stub its
+    # own Binwalk scan so this test doesn't depend on a real install.
+    monkeypatch.setattr(binwalk_wrapper, "scan_file", lambda filepath: [])
+
+    extracted_dir = tmp_path / "_firmware.bin.extracted"
+    (extracted_dir / "etc").mkdir(parents=True)
+    (extracted_dir / "etc" / "passwd").write_text(
+        "root:x:0:0:root:/root:/bin/ash\n"
+        "backdoor:x:0:0:backdoor:/root:/bin/sh\n"
+        "nobody:x:65534:65534:nobody:/:/bin/false\n"
+    )
+    _mock_extract_with_fake_extracted_dir(monkeypatch, extracted_dir)
+
+    firmware_path = tmp_path / "firmware.bin"
+    firmware_path.write_bytes(b"\x00" * 200)
+
+    findings = firmware_pipeline.run_pipeline(str(firmware_path))
+
+    filesystem_findings = [f for f in findings if f.module_name == "filesystem"]
+    assert len(filesystem_findings) == 1
+    assert filesystem_findings[0].severity == "high"
+    assert not extracted_dir.exists()
+    assert firmware_path.exists()

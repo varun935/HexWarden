@@ -282,6 +282,26 @@ GOLDEN_HIGH_ENTROPY_THRESHOLD: float = 7.2
 GOLDEN_DIFF_BASE_CONFIDENCE: float = 0.8
 
 # --------------------------------------------------------------------------
+# Filesystem analysis (modules/filesystem.py)
+# --------------------------------------------------------------------------
+FILESYSTEM_CRON_PATHS: List[str] = [
+    "etc/crontab",
+    "etc/cron.d",
+    "etc/cron.daily",
+    "etc/cron.hourly",
+    "var/spool/cron",
+]
+FILESYSTEM_SUSPICIOUS_EXEC_LOCATIONS: List[str] = ["/tmp/", "/var/tmp/", "/dev/shm/"]
+FILESYSTEM_SYSTEM_DIRS_CHECK_WRITABLE: List[str] = [
+    "/etc/",
+    "/bin/",
+    "/sbin/",
+    "/usr/bin/",
+    "/usr/sbin/",
+]
+FILESYSTEM_BASE64_MIN_LENGTH: int = 20  # shorter runs are too common to be a useful signal
+
+# --------------------------------------------------------------------------
 # Logging
 # --------------------------------------------------------------------------
 LOG_FORMAT: str = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
