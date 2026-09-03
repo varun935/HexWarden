@@ -18,6 +18,7 @@ import argparse
 import logging
 import math
 import sys
+import warnings
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
@@ -271,10 +272,42 @@ def compute_local_contrast(samples: List[EntropySample]) -> List[LocalContrastRe
     inside a 7.8-entropy compressed blob is unremarkable; the same value
     in the middle of 5.5-entropy code is a real outlier.
 
+    Dead-space windows (entropy below `config.ENTROPY_DEADSPACE_THRESHOLD`
+    -- zero-padding, unallocated sectors, filesystem gaps) are excluded
+    from every neighborhood's median/IQR: a firmware image that is mostly
+    empty space would otherwise drag a real region's neighborhood baseline
+    toward 0.0 whenever padding falls on either side of it, making
+    ordinary low-entropy content (e.g. plain code at ~4.9 bits/byte) look
+    like a massive anomaly purely because of what's dead space nearby, not
+    because of anything about the region itself.
+
+    Excluding dead space is not enough on its own, though: a real,
+    injected payload up to roughly `config.ENTROPY_NEIGHBORHOOD_BYTES`
+    wide, isolated in a much larger sea of dead space (e.g. appended past
+    a disk image's real content, with nothing but padding for megabytes
+    behind it), would otherwise end up being the *only* real content
+    within reach -- its own samples become its "neighborhood", comparing
+    itself to itself, which can never register as an anomaly and never
+    trips the too-little-neighborhood fallback either (there would be
+    plenty of "real" samples -- they would just all be the payload). The
+    immediate `config.ENTROPY_NEIGHBORHOOD_BYTES` around a sample is
+    therefore treated as a guard band and excluded from its own
+    statistics entirely; genuine training data for the median/IQR comes
+    only from `config.ENTROPY_NEIGHBORHOOD_TRAINING_MULTIPLIER` times
+    that radius further out still -- the same technique CFAR radar
+    detectors use (guard cells around the cell under test, training cells
+    beyond them) so a target never pollutes its own background estimate.
+    If, after excluding dead space and the guard band, fewer than
+    `config.ENTROPY_MIN_NEIGHBORHOOD_WINDOWS` real training samples
+    remain, there is no meaningful neighborhood to contrast against at
+    all, so that sample falls back to being judged on absolute entropy
+    alone (via `severity_for_entropy()`) rather than local contrast.
+
     Reads `config.ENTROPY_NEIGHBORHOOD_BYTES`, `_ADAPTIVE_IQR_MULTIPLIER`,
-    `_LOCAL_ANOMALY_MIN_DELTA`, and `_LOCAL_CONTRAST_STRIDE` directly
-    (rather than taking a `config` parameter) to match every other
-    function in this module.
+    `_LOCAL_ANOMALY_MIN_DELTA`, `_LOCAL_CONTRAST_STRIDE`,
+    `_DEADSPACE_THRESHOLD`, `_MIN_NEIGHBORHOOD_WINDOWS`, and
+    `_NEIGHBORHOOD_TRAINING_MULTIPLIER` directly (rather than taking a
+    `config` parameter) to match every other function in this module.
 
     For performance, the neighborhood's median and IQR are evaluated
     every `config.ENTROPY_LOCAL_CONTRAST_STRIDE` samples (a full-resolution
@@ -299,17 +332,37 @@ def compute_local_contrast(samples: List[EntropySample]) -> List[LocalContrastRe
     entropies = np.array([sample.entropy for sample in samples], dtype=np.float64)
     sample_count = len(entropies)
 
+    # Dead-space entries are replaced with NaN so the nan-aware statistics
+    # below skip them per-window automatically -- a region's neighborhood
+    # baseline reflects only the real content around it, never the empty
+    # gaps. The sample's own entropy (used for is_anomaly and reported in
+    # the result) is untouched; this only changes what counts as *context*.
+    real_mask = entropies >= config.ENTROPY_DEADSPACE_THRESHOLD
+    entropies_for_neighborhood = np.where(real_mask, entropies, np.nan)
+
     step_size = config.ENTROPY_STEP_SIZE
-    radius_samples = max(1, config.ENTROPY_NEIGHBORHOOD_BYTES // step_size)
+    guard_radius_samples = max(1, config.ENTROPY_NEIGHBORHOOD_BYTES // step_size)
+    radius_samples = guard_radius_samples * config.ENTROPY_NEIGHBORHOOD_TRAINING_MULTIPLIER
     window_size = radius_samples * 2 + 1
 
     if sample_count <= window_size:
         # Too few samples for a meaningful sliding neighborhood; treat the
-        # whole stream as every sample's neighborhood.
-        median_value = float(np.median(entropies))
-        q75, q25 = np.percentile(entropies, [75, 25])
+        # whole stream (minus dead space) as every sample's neighborhood.
+        # No guard band here -- there is nowhere else to look for training
+        # data in a file this small, so the fallback below (triggered by
+        # too few real samples) is what protects a small isolated blob.
+        real_values = entropies[real_mask]
+        real_count = len(real_values)
+        if real_count > 0:
+            median_value = float(np.median(real_values))
+            q75, q25 = np.percentile(real_values, [75, 25])
+            iqr_value = float(q75 - q25)
+        else:
+            median_value = 0.0
+            iqr_value = 0.0
         medians = np.full(sample_count, median_value)
-        iqrs = np.full(sample_count, float(q75 - q25))
+        iqrs = np.full(sample_count, iqr_value)
+        real_counts = np.full(sample_count, real_count, dtype=np.float64)
     else:
         stride = max(1, config.ENTROPY_LOCAL_CONTRAST_STRIDE)
 
@@ -322,17 +375,58 @@ def compute_local_contrast(samples: List[EntropySample]) -> List[LocalContrastRe
         # EOF, replicated outward by edge-padding, would drag the
         # neighborhood median up together with the anomaly itself and
         # mask the very anomaly this function exists to catch.
-        windows = sliding_window_view(entropies, window_size)
-        interior_count = windows.shape[0]  # == sample_count - window_size + 1
+        #
+        # The guard band itself is never materialized: rather than slide a
+        # full 2*radius_samples+1-wide window and NaN out its middle (which
+        # would double the per-window memory footprint for no benefit --
+        # this loads a 184MB firmware image's worth of samples fine at the
+        # old single-sided radius but not at 2x that), only the two
+        # guard_radius_samples-wide training slices on either side of the
+        # guard band are ever built.
+        interior_count = sample_count - window_size + 1
 
         interior_eval_indices = np.arange(0, interior_count, stride)
         if interior_eval_indices[-1] != interior_count - 1:
             interior_eval_indices = np.append(interior_eval_indices, interior_count - 1)
 
-        q25_eval, median_eval, q75_eval = np.percentile(
-            windows[interior_eval_indices], [25, 50, 75], axis=1
-        )
-        iqr_eval = q75_eval - q25_eval
+        # A window-start index j corresponds to a center sample at
+        # j + radius_samples. The left training slice for that center
+        # starts at j (covering [center - radius_samples, center -
+        # guard_radius_samples - 1]); the right slice starts at
+        # j + radius_samples + guard_radius_samples + 1 (covering
+        # [center + guard_radius_samples + 1, center + radius_samples]).
+        # Both are guard_radius_samples wide and drawn from the same
+        # guard_radius_samples-wide sliding view.
+        annulus_windows = sliding_window_view(entropies_for_neighborhood, guard_radius_samples)
+        left_starts = interior_eval_indices
+        right_starts = interior_eval_indices + radius_samples + guard_radius_samples + 1
+
+        # Fancy indexing (an array of indices, not a slice) always copies,
+        # so these copies are independent of the underlying view and of
+        # each other.
+        eval_left = annulus_windows[left_starts]
+        eval_right = annulus_windows[right_starts]
+        eval_windows = np.concatenate([eval_left, eval_right], axis=1)
+        del eval_left, eval_right
+
+        real_count_eval = np.count_nonzero(~np.isnan(eval_windows), axis=1)
+
+        # A window with no real training data beyond the guard band yields
+        # an all-NaN slice; np.nanpercentile warns and returns NaN for
+        # those rather than raising. The placeholder 0.0 substituted for
+        # them is never actually used for detection since real_count_eval
+        # already marks those points for the absolute-entropy fallback.
+        # numpy's all-NaN-slice warning is emitted via Python's `warnings`
+        # module (from numpy.lib.nanfunctions), not via numpy's
+        # floating-point error-state mechanism -- np.errstate does not
+        # silence it, so it is suppressed here explicitly instead.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            q25_eval, median_eval, q75_eval = np.nanpercentile(
+                eval_windows, [25, 50, 75], axis=1
+            )
+        median_eval = np.nan_to_num(median_eval, nan=0.0)
+        iqr_eval = np.nan_to_num(q75_eval - q25_eval, nan=0.0)
 
         # Map window-local indices back to sample indices (a window
         # starting at array index i is centered on sample i + radius_samples).
@@ -340,22 +434,72 @@ def compute_local_contrast(samples: List[EntropySample]) -> List[LocalContrastRe
 
         # Samples within radius_samples of either edge have no full
         # symmetric window; np.interp clamps out-of-range x to the
-        # nearest evaluated (interior) y-value rather than extrapolating,
-        # so a boundary sample borrows its nearest fully-computed
-        # neighbor's statistics instead of a contaminated one of its own.
+        # nearest evaluated (interior) y-value rather than extrapolating.
+        # That clamp is only filled in as a placeholder here -- it is
+        # overwritten below for every edge sample with a real one-sided
+        # computation, because clamping to the nearest interior center is
+        # NOT safe in general: that nearest center's own training annulus
+        # can itself reach past the edge and into a genuine anomaly
+        # narrower than radius_samples sitting right at the file boundary
+        # (e.g. a payload appended at EOF) -- which would silently
+        # contaminate every edge sample's "borrowed" stats with the very
+        # anomaly they need to be judged against.
         full_indices = np.arange(sample_count)
         medians = np.interp(full_indices, sample_eval_indices, median_eval)
         iqrs = np.interp(full_indices, sample_eval_indices, iqr_eval)
+        real_counts = np.interp(
+            full_indices, sample_eval_indices, real_count_eval.astype(np.float64)
+        )
+
+        # True edge samples get a genuine ONE-SIDED annulus instead: the
+        # only side that exists at all is guard-banded and used directly.
+        # Each edge zone is only radius_samples samples wide, so computing
+        # it directly (no striding) costs nothing next to the interior
+        # pass above. The two zones, plus the interior range handled by
+        # interpolation above, exactly partition every sample -- there is
+        # no gap and no overlap.
+        def _apply_one_sided_edge(edge_indices: np.ndarray, starts: np.ndarray) -> None:
+            valid = (starts >= 0) & (starts <= sample_count - guard_radius_samples)
+            if not np.any(valid):
+                return
+            edge_indices = edge_indices[valid]
+            edge_windows = annulus_windows[starts[valid]]
+            edge_real_counts = np.count_nonzero(~np.isnan(edge_windows), axis=1)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=RuntimeWarning)
+                q25_edge, median_edge, q75_edge = np.nanpercentile(
+                    edge_windows, [25, 50, 75], axis=1
+                )
+            medians[edge_indices] = np.nan_to_num(median_edge, nan=0.0)
+            iqrs[edge_indices] = np.nan_to_num(q75_edge - q25_edge, nan=0.0)
+            real_counts[edge_indices] = edge_real_counts
+
+        left_edge_indices = np.arange(0, min(radius_samples, sample_count))
+        _apply_one_sided_edge(left_edge_indices, left_edge_indices + guard_radius_samples + 1)
+
+        right_edge_indices = np.arange(max(0, sample_count - radius_samples), sample_count)
+        _apply_one_sided_edge(right_edge_indices, right_edge_indices - radius_samples)
 
     multiplier = config.ENTROPY_ADAPTIVE_IQR_MULTIPLIER
     min_delta = config.ENTROPY_LOCAL_ANOMALY_MIN_DELTA
+    min_real_windows = config.ENTROPY_MIN_NEIGHBORHOOD_WINDOWS
 
     results: List[LocalContrastResult] = []
     for index, sample in enumerate(samples):
         median_value = float(medians[index])
         iqr_value = float(iqrs[index])
-        delta = sample.entropy - median_value
-        is_anomaly = delta > (multiplier * iqr_value) and delta >= min_delta
+
+        if real_counts[index] < min_real_windows:
+            # Isolated blob surrounded (almost) entirely by dead space --
+            # there is no real neighborhood left to contrast against.
+            # Judge it on absolute entropy alone instead, using the same
+            # thresholds merge_regions() uses, rather than comparing it to
+            # a neighborhood baseline that is itself mostly padding.
+            is_anomaly = severity_for_entropy(sample.entropy) in ("high", "critical")
+        else:
+            delta = sample.entropy - median_value
+            is_anomaly = delta > (multiplier * iqr_value) and delta >= min_delta
+
         results.append(
             LocalContrastResult(
                 offset=sample.offset,
