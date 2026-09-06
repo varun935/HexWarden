@@ -339,6 +339,41 @@ FILESYSTEM_SYSTEM_DIRS_CHECK_WRITABLE: List[str] = [
 FILESYSTEM_BASE64_MIN_LENGTH: int = 20  # shorter runs are too common to be a useful signal
 
 # --------------------------------------------------------------------------
+# Network monitor (modules/dynamic/network_monitor.py)
+#
+# Analyzes a pcap capture (real hardware or synthetic) for signs of a
+# firmware trojan phoning home: suspicious destinations, plaintext payload
+# content, encrypted-C2 patterns via SNI, DNS tunneling, and beacon timing.
+# No single signal here is a verdict -- see the confidence scoring table in
+# the module docstring for how signals combine into one Finding per
+# suspicious connection.
+# --------------------------------------------------------------------------
+NETWORK_MONITOR_BENIGN_PORTS: List[int] = [53, 80, 123]
+# Note: 443 and 22 are intentionally NOT on this list -- plaintext traffic
+# on the TLS/SSH port is a real evasion technique (looks encrypted at a
+# glance, isn't), so both stay at full suspicion rather than being waved
+# through by port number alone.
+
+NETWORK_MONITOR_BEACON_REPEAT_THRESHOLD: int = 3  # connections at/above this count are "repeated"
+NETWORK_MONITOR_PAYLOAD_ENTROPY_THRESHOLD: float = 7.2  # plaintext connection, compressed/encrypted-looking payload
+NETWORK_MONITOR_DNS_ENTROPY_THRESHOLD: float = 3.8  # tuned for short ASCII subdomain strings, not byte entropy
+NETWORK_MONITOR_DNS_REPEAT_THRESHOLD: int = 5  # same domain queried more than this many times in one capture
+
+# Prefix match against the destination IP string. Known cloud provider
+# ranges reduce (but do not zero out) suspicion -- CDN/cloud-routed C2
+# cannot be reliably distinguished from legitimate cloud traffic at this
+# level (documented limitation, see modules/dynamic/network_monitor.py).
+NETWORK_MONITOR_KNOWN_CLOUD_RANGES: List[str] = [
+    "3.",        # AWS
+    "52.",       # AWS
+    "54.",       # AWS
+    "104.16.",   # Cloudflare
+    "104.17.",   # Cloudflare
+    "8.8.",      # Google
+    "8.34.",     # Google
+]
+
+# --------------------------------------------------------------------------
 # Logging
 # --------------------------------------------------------------------------
 LOG_FORMAT: str = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
