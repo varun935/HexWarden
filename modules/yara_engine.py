@@ -258,12 +258,44 @@ class YaraEngine:
             )
         return findings
 
-    def scan_tree(self, root: str | Path, dedupe: bool = True) -> Iterator[Finding]:
+    def scan_tree(
+        self,
+        root: str | Path,
+        dedupe: bool = True,
+        raw_image: str | Path | None = None,
+    ) -> Iterator[Finding]:
         """
         Walk a binwalk extraction directory. Dedupes by content hash — extracted
         rootfs trees are full of hardlink/duplicate copies of the same binary.
+
+        Also always scans the raw source image, if one is given or can be
+        inferred from the `<name>.extracted` naming convention used elsewhere
+        in this repo. Binwalk only carves out regions it recognizes — bytes
+        in inter-partition padding or appended past the end of the original
+        image never make it into the extraction tree, and that is exactly
+        where a firmware trojan is likely to hide. Skipping the raw image
+        here silently blinds the scanner to that class of implant.
         """
         root = Path(root)
+
+        if raw_image is None:
+            name = root.name
+            if name.endswith(".extracted"):
+                candidate = root.parent / name[: -len(".extracted")]
+                if candidate.is_file():
+                    raw_image = candidate
+
+        if raw_image is not None:
+            raw_image = Path(raw_image)
+            try:
+                digest = sha256_file(raw_image)
+            except OSError as e:
+                log.warning("Cannot read raw image %s: %s", raw_image, e)
+            else:
+                if not (dedupe and digest in self._seen_hashes):
+                    self._seen_hashes.add(digest)
+                    yield from self.scan_file(raw_image, digest=digest)
+
         for path in sorted(root.rglob("*")):
             if not path.is_file() or path.is_symlink():
                 continue
@@ -307,6 +339,8 @@ def main() -> int:
     ap.add_argument("target", help="File or extracted-firmware directory to scan")
     ap.add_argument("-r", "--rules", default="rules", help="Rules directory")
     ap.add_argument("-g", "--golden", help="Golden image / extraction dir for baseline suppression")
+    ap.add_argument("--raw-image", help="Raw firmware image to scan alongside an extraction dir "
+                                         "(auto-detected from '<name>.extracted' naming if omitted)")
     ap.add_argument("-o", "--output", help="Write findings as JSON")
     ap.add_argument("--show-suppressed", action="store_true")
     ap.add_argument("-v", "--verbose", action="store_true")
@@ -330,7 +364,7 @@ def main() -> int:
     findings = (
         engine.scan_file(target)
         if target.is_file()
-        else list(engine.scan_tree(target))
+        else list(engine.scan_tree(target, raw_image=args.raw_image))
     )
 
     visible = findings if args.show_suppressed else [
