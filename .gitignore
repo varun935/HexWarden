@@ -18,6 +18,7 @@ env/
 # Project specific
 tmp/
 output/
+extractions/
 *.img
 *.bin
 *.png
