@@ -192,15 +192,3 @@ See `tests/test_firmware_pipeline.py`'s `_MAX_ENTROPY_BLOB` for the exact
 byte-permutation-blob pattern used by the automated test suite, which
 correctly avoids the `os.urandom()` small-window bias described above.
 
-## TODO
-
-- [ ] Project description and motivation
-- [ ] Architecture overview (see `docs/architecture.md`)
-- [ ] Installation instructions
-- [ ] Usage examples (see `docs/usage.md`)
-- [ ] Supported firmware/architectures (ESP32, STM32, ARM, MIPS, ...)
-- [ ] Module overview (entropy, strings, imports, YARA, crypto constants, filesystem, dynamic analysis)
-- [ ] Rule writing guide (see `docs/rule_writing.md`)
-- [ ] Contributing guidelines
-- [ ] License
-- [ ] Acknowledgements / SIH1387 context
