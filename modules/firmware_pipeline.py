@@ -42,6 +42,13 @@ alone. A region only becomes a Finding if it is anomalous IN CONTEXT:
        extracted directory tree -- applying steps 1-6 to every file in it,
        up to `config.EXTRACTED_MAX_DEPTH` levels deep -- is equivalent to
        repeating steps 1-7 at each nesting level.
+    8. As soon as that extraction is on disk (and before it is walked for
+       entropy), `modules/filesystem.py` runs its own independent checks
+       against the same extracted tree -- no second extraction -- looking
+       for backdoor accounts, suspicious persistence, and misplaced
+       executables. Its findings (module_name="filesystem") merge into
+       the same combined list; a failure there is logged and does not
+       abort the rest of the pipeline.
 
 The findings list contains only anomaly candidates: format-consistent
 regions dropped in step 4 never appear. Aggregate counts (regions
@@ -58,11 +65,12 @@ Inputs:
     filepath (str): Path to a firmware binary file to analyze.
 
 Outputs:
-    List[Finding]: Candidate findings from both the raw-binary scan
-    (module_name="firmware_pipeline") and the extracted-file walk
-    (module_name="firmware_pipeline_extracted"). As a side effect, a
-    combined entropy plot is written under the configured output
-    directory (before the extracted directory tree is cleaned up).
+    List[Finding]: Candidate findings from the raw-binary scan
+    (module_name="firmware_pipeline"), the extracted-file entropy walk
+    (module_name="firmware_pipeline_extracted"), and the filesystem
+    checks (module_name="filesystem"). As a side effect, a combined
+    entropy plot is written under the configured output directory
+    (before the extracted directory tree is cleaned up).
 """
 
 import logging
@@ -76,7 +84,7 @@ from typing import Dict, List, Optional, Tuple
 
 import config
 from core import AnalysisError, Finding
-from modules import binwalk_wrapper, entropy
+from modules import binwalk_wrapper, entropy, filesystem
 from modules.binwalk_wrapper import BinwalkRegion, BinwalkResult
 
 logger = logging.getLogger(__name__)
@@ -1020,6 +1028,30 @@ def _cleanup_extracted_dir(extracted_dir: Optional[Path]) -> None:
         logger.warning("Cleanup WARNING — could not remove %s: %s", extracted_dir, exc)
 
 
+def _run_filesystem_checks(extracted_dir: Path) -> List[Finding]:
+    """Run `modules/filesystem.py`'s checks against the extracted directory.
+
+    Reuses the same extraction already on disk from `_process_raw_binary()`
+    -- no second extraction. Filesystem checks are best-effort, like every
+    other step in this pipeline: a failure here never aborts the run.
+
+    Args:
+        extracted_dir: Root directory of Binwalk's extracted contents.
+
+    Returns:
+        Findings from `filesystem.analyze()`, or an empty list if it
+        raises.
+
+    Raises:
+        None.
+    """
+    try:
+        return filesystem.analyze(str(extracted_dir))
+    except (FileNotFoundError, AnalysisError) as exc:
+        logger.warning("Filesystem analysis failed, continuing without it: %s", exc)
+        return []
+
+
 def run_pipeline_with_summary(filepath: str) -> Tuple[List[Finding], EntropySummary]:
     """Run the full context-aware pipeline, returning findings and the entropy summary.
 
@@ -1072,22 +1104,39 @@ def run_pipeline_with_summary(filepath: str) -> Tuple[List[Finding], EntropySumm
 
         extracted_findings: List[Finding] = []
         extracted_file_offsets: Dict[str, int] = {}
-        if extracted_dir is not None and config.EXTRACTED_SCAN_ENABLED:
-            entries = _list_extracted_files(extracted_dir)
-            logger.info("Extracted %d files from %s, scanning...", len(entries), path)
-            extracted_findings, extracted_file_offsets, ext_summary = _walk_extracted(
-                extracted_dir, entries, len(data)
-            )
-            overall_summary.merge(ext_summary)
+        if extracted_dir is not None:
+            # Filesystem checks reuse this same extraction -- never a
+            # second extraction -- and run regardless of
+            # config.EXTRACTED_SCAN_ENABLED (that flag is specific to the
+            # entropy-based extracted-file walk below).
+            logger.info("Running filesystem checks on extracted contents...")
+            filesystem_findings = _run_filesystem_checks(extracted_dir)
+            fs_severity_counts = Counter(finding.severity for finding in filesystem_findings)
             logger.info(
-                "Extracted file entropy: %d region(s) analyzed, %d dropped (format-consistent), "
-                "%d local anomaly candidate(s), %d whole-file anomaly(ies)",
-                ext_summary.regions_analyzed,
-                ext_summary.dropped_format_consistent,
-                ext_summary.local_anomaly_candidates,
-                ext_summary.whole_file_anomalies,
+                "Filesystem analysis: %d findings (%d high, %d medium, %d low)",
+                len(filesystem_findings),
+                fs_severity_counts.get("high", 0),
+                fs_severity_counts.get("medium", 0),
+                fs_severity_counts.get("low", 0),
             )
-            all_findings.extend(extracted_findings)
+            all_findings.extend(filesystem_findings)
+
+            if config.EXTRACTED_SCAN_ENABLED:
+                entries = _list_extracted_files(extracted_dir)
+                logger.info("Extracted %d files from %s, scanning...", len(entries), path)
+                extracted_findings, extracted_file_offsets, ext_summary = _walk_extracted(
+                    extracted_dir, entries, len(data)
+                )
+                overall_summary.merge(ext_summary)
+                logger.info(
+                    "Extracted file entropy: %d region(s) analyzed, %d dropped (format-consistent), "
+                    "%d local anomaly candidate(s), %d whole-file anomaly(ies)",
+                    ext_summary.regions_analyzed,
+                    ext_summary.dropped_format_consistent,
+                    ext_summary.local_anomaly_candidates,
+                    ext_summary.whole_file_anomalies,
+                )
+                all_findings.extend(extracted_findings)
 
         # Plot before cleanup: extracted file paths must still exist on
         # disk to extend the entropy curve past the raw binary.

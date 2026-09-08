@@ -170,6 +170,43 @@ ENTROPY_LOCAL_ANOMALY_MIN_DELTA: float = 2.5  # ...and by at least this many bit
 # the same firmware at the default stride, with negligible accuracy loss).
 ENTROPY_LOCAL_CONTRAST_STRIDE: int = 16
 
+# Windows below this entropy are dead space (zero-padding, unallocated
+# sectors, filesystem gaps) and are excluded from neighborhood statistics --
+# they are not meaningful local context. Fixes a real false-positive
+# pattern found on a 184MB disk image mostly made of empty space: a region
+# near the edge of a data blob has a neighborhood that is half real
+# content, half zero-padding, so the neighborhood median gets dragged
+# toward 0.0 by the emptiness -- and then any real content, even boring
+# ~4.9-entropy code, reads as a massive anomaly against that artificially
+# low baseline. It also made drop/candidate decisions non-deterministic:
+# appending bytes anywhere in the file shifts where padding falls relative
+# to chunk boundaries, silently changing which regions had zero-poisoned
+# neighborhoods.
+ENTROPY_DEADSPACE_THRESHOLD: float = 0.5
+
+# Minimum real (non-dead-space) windows needed to compute a meaningful
+# neighborhood. Below this, a region is an isolated blob surrounded only
+# by padding -- there is no real neighborhood to contrast it against, so
+# it is judged on absolute entropy alone instead (see
+# `entropy.severity_for_entropy()`) rather than being wrongly flagged
+# (contrast against zeros) or wrongly missed.
+ENTROPY_MIN_NEIGHBORHOOD_WINDOWS: int = 8
+
+# A region up to roughly ENTROPY_NEIGHBORHOOD_BYTES wide, isolated in dead
+# space, would otherwise count its OWN samples as its "neighborhood" once
+# dead space is excluded -- comparing itself to itself always yields
+# delta=0, never an anomaly, and never trips the insufficient-neighborhood
+# fallback either (its own samples satisfy ENTROPY_MIN_NEIGHBORHOOD_WINDOWS
+# trivially). The immediate +/-ENTROPY_NEIGHBORHOOD_BYTES around a sample
+# is therefore treated as a "guard band" and excluded from its own
+# statistics entirely; real training data for the median/IQR (and for the
+# real-window count that decides the fallback) comes only from this many
+# multiples of that radius further out still -- the same technique CFAR
+# radar detectors use (guard cells around the cell under test, training
+# cells beyond them) to keep a target from polluting its own background
+# estimate.
+ENTROPY_NEIGHBORHOOD_TRAINING_MULTIPLIER: int = 2
+
 # Global whole-file check (modules/firmware_pipeline.py): catches a file
 # with no internal contrast because it is uniformly encrypted throughout.
 ENTROPY_GLOBAL_SUSPICIOUS_MEDIAN: float = 7.8
@@ -280,6 +317,61 @@ GOLDEN_HIGH_ENTROPY_THRESHOLD: float = 7.2
 # ambiguity heuristic detection has to live with -- if it's not in the
 # golden image, it wasn't there originally.
 GOLDEN_DIFF_BASE_CONFIDENCE: float = 0.8
+
+# --------------------------------------------------------------------------
+# Filesystem analysis (modules/filesystem.py)
+# --------------------------------------------------------------------------
+FILESYSTEM_CRON_PATHS: List[str] = [
+    "etc/crontab",
+    "etc/cron.d",
+    "etc/cron.daily",
+    "etc/cron.hourly",
+    "var/spool/cron",
+]
+FILESYSTEM_SUSPICIOUS_EXEC_LOCATIONS: List[str] = ["/tmp/", "/var/tmp/", "/dev/shm/"]
+FILESYSTEM_SYSTEM_DIRS_CHECK_WRITABLE: List[str] = [
+    "/etc/",
+    "/bin/",
+    "/sbin/",
+    "/usr/bin/",
+    "/usr/sbin/",
+]
+FILESYSTEM_BASE64_MIN_LENGTH: int = 20  # shorter runs are too common to be a useful signal
+
+# --------------------------------------------------------------------------
+# Network monitor (modules/dynamic/network_monitor.py)
+#
+# Analyzes a pcap capture (real hardware or synthetic) for signs of a
+# firmware trojan phoning home: suspicious destinations, plaintext payload
+# content, encrypted-C2 patterns via SNI, DNS tunneling, and beacon timing.
+# No single signal here is a verdict -- see the confidence scoring table in
+# the module docstring for how signals combine into one Finding per
+# suspicious connection.
+# --------------------------------------------------------------------------
+NETWORK_MONITOR_BENIGN_PORTS: List[int] = [53, 80, 123]
+# Note: 443 and 22 are intentionally NOT on this list -- plaintext traffic
+# on the TLS/SSH port is a real evasion technique (looks encrypted at a
+# glance, isn't), so both stay at full suspicion rather than being waved
+# through by port number alone.
+
+NETWORK_MONITOR_BEACON_REPEAT_THRESHOLD: int = 3  # connections at/above this count are "repeated"
+NETWORK_MONITOR_PAYLOAD_ENTROPY_THRESHOLD: float = 7.2  # plaintext connection, compressed/encrypted-looking payload
+NETWORK_MONITOR_DNS_ENTROPY_THRESHOLD: float = 3.8  # tuned for short ASCII subdomain strings, not byte entropy
+NETWORK_MONITOR_DNS_REPEAT_THRESHOLD: int = 5  # same domain queried more than this many times in one capture
+
+# Prefix match against the destination IP string. Known cloud provider
+# ranges reduce (but do not zero out) suspicion -- CDN/cloud-routed C2
+# cannot be reliably distinguished from legitimate cloud traffic at this
+# level (documented limitation, see modules/dynamic/network_monitor.py).
+NETWORK_MONITOR_KNOWN_CLOUD_RANGES: List[str] = [
+    "3.",        # AWS
+    "52.",       # AWS
+    "54.",       # AWS
+    "104.16.",   # Cloudflare
+    "104.17.",   # Cloudflare
+    "8.8.",      # Google
+    "8.34.",     # Google
+]
 
 # --------------------------------------------------------------------------
 # Logging

@@ -35,3 +35,4 @@ golden/openwrt-25.12.5-bcm27xx-bcm2712-rpi-5-ext4-factory.img.extracted/0/Linux_
 .DS_Store
 *.swp
 *~
+golden/

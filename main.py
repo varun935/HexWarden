@@ -33,7 +33,7 @@ from typing import List, Optional, Sequence, Tuple
 
 import config
 from core import AnalysisError, Finding
-from modules import entropy, firmware_pipeline, golden_diff
+from modules import entropy, filesystem, firmware_pipeline, golden_diff
 
 logger = logging.getLogger(__name__)
 
@@ -41,15 +41,25 @@ logger = logging.getLogger(__name__)
 # that have been implemented so far are listed here; unimplemented
 # modules from config.ENABLED_MODULES are intentionally omitted until
 # they are built out. "pipeline" runs entropy plus recursive Binwalk
-# extraction; "entropy" remains available standalone for a raw-binary-only
-# scan with no extraction step. "golden_diff" is listed here for CLI
-# help/validation purposes only -- it takes (golden, suspect) rather than
-# a single firmware path, so `run()` special-cases its invocation instead
-# of calling it through the generic single-argument loop below.
+# extraction, and -- now that filesystem.py is wired into
+# firmware_pipeline.py -- filesystem checks against that same extraction
+# too, automatically; "entropy" remains available standalone for a
+# raw-binary-only scan with no extraction step. "golden_diff" is listed
+# here for CLI help/validation purposes only -- it takes (golden, suspect)
+# rather than a single firmware path, so `run()` special-cases its
+# invocation instead of calling it through the generic single-argument
+# loop below. "filesystem" is registered per the same generic pattern for
+# standalone/isolated use (`python -m modules.filesystem <dir>` remains
+# the direct entry point -- it still expects an *extracted directory*,
+# not a firmware file, so running it here via `--firmware` will fail with
+# a clear FileNotFoundError); in normal use, running "pipeline" already
+# includes filesystem checks, so `--modules filesystem` on its own is not
+# the primary way to get them.
 _AVAILABLE_MODULES = {
     "entropy": entropy.analyze,
     "pipeline": firmware_pipeline.run_pipeline,
     "golden_diff": golden_diff.analyze_diff,
+    "filesystem": filesystem.analyze,
 }
 
 

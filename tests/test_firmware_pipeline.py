@@ -37,6 +37,13 @@ from modules import binwalk_wrapper, entropy, firmware_pipeline
 # reproducible high-entropy region.
 _MAX_ENTROPY_BLOB = bytes(range(256)) * 64  # 16384 bytes, peak entropy 8.0
 
+# A repeating cycle over only 30 distinct byte values: a 256-byte window's
+# entropy converges to log2(30) ≈ 4.907 bits/byte -- deterministically
+# "boring", ordinary content (e.g. plain code), well under
+# config.ENTROPY_THRESHOLD_LOW (6.5). Used to reproduce the exact
+# real-world false-positive pattern that motivated the dead-space fix.
+_LOW_ENTROPY_BLOB = bytes(range(30)) * 640  # 19200 bytes, ~4.9 bits/byte
+
 
 def _low_high_low_buffer(blob: bytes = _MAX_ENTROPY_BLOB, padding_size: int = 200_000) -> bytes:
     """Build a low-entropy buffer with a high-entropy blob embedded in the middle."""
@@ -113,6 +120,89 @@ def test_local_anomaly_in_low_entropy_neighborhood_produces_candidate() -> None:
     assert all(finding.raw["candidate"] is True for finding in findings)
     assert any(finding.raw["local_anomaly"] is True for finding in findings)
     assert any(finding.raw["recognized_format"] is None for finding in findings)
+
+
+def test_isolated_high_entropy_blob_in_deadspace_is_flagged_via_absolute_fallback() -> None:
+    """A high-entropy blob isolated in dead space has no real neighborhood -- and is still caught.
+
+    Regression test for a gap in the dead-space fix itself: merely excluding dead-space windows
+    from neighborhood statistics is not enough when the isolated region is comparable in size to
+    the neighborhood radius, because it would otherwise become its own "neighborhood" (compared
+    against itself, never registering as an anomaly). `compute_local_contrast()` instead falls
+    back to judging such a region on its own absolute entropy once too few real neighborhood
+    samples remain -- and a genuinely high-entropy blob (peak 8.0) must still surface as a
+    candidate through that fallback.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If the blob's samples are not flagged as anomalies via the fallback.
+    """
+    data = _low_high_low_buffer()  # _MAX_ENTROPY_BLOB isolated between wide zero-padding
+    samples = entropy.compute_entropy_samples(data)
+    results = entropy.compute_local_contrast(samples)
+
+    # Only windows entirely inside the blob -- one straddling the blob/padding
+    # boundary mixes both and is not representative of the blob's own entropy.
+    blob_start = 200_000
+    blob_end = blob_start + len(_MAX_ENTROPY_BLOB)
+    window_size = config.ENTROPY_WINDOW_SIZE
+    blob_results = [
+        result
+        for result in results
+        if blob_start <= result.offset and result.offset + window_size <= blob_end
+    ]
+
+    assert blob_results
+    assert all(result.is_anomaly for result in blob_results)
+    # No real neighborhood samples survived exclusion -- this went through the
+    # absolute-entropy fallback, not a local-contrast comparison.
+    assert all(result.neighborhood_median == 0.0 for result in blob_results)
+
+
+def test_isolated_low_entropy_blob_in_deadspace_is_not_flagged() -> None:
+    """A low-entropy (~4.9 bits/byte) blob isolated in dead space is NOT flagged.
+
+    This reproduces the exact real-world false-positive pattern that motivated the dead-space
+    fix: ordinary, boring low-entropy content (e.g. plain code) sitting near padding in a
+    mostly-empty disk image. Before the fix, the blob's neighborhood median was dragged toward
+    0.0 by the surrounding zero-padding, making its unremarkable entropy read as a massive local
+    anomaly ("peak 4.9 vs. neighborhood median 0.0"). With dead space excluded and no real
+    neighborhood left, this now falls back to absolute-entropy judgment -- and ~4.9 bits/byte is
+    well under even config.ENTROPY_THRESHOLD_LOW, so it must produce zero findings.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If any sample in the blob is flagged as an anomaly, or the full
+            pipeline-level analysis produces any finding for it.
+    """
+    data = _low_high_low_buffer(blob=_LOW_ENTROPY_BLOB)
+    samples = entropy.compute_entropy_samples(data)
+    results = entropy.compute_local_contrast(samples)
+
+    # Only windows entirely inside the blob -- one straddling the blob/padding
+    # boundary mixes both and is not representative of the blob's own entropy.
+    blob_start = 200_000
+    blob_end = blob_start + len(_LOW_ENTROPY_BLOB)
+    window_size = config.ENTROPY_WINDOW_SIZE
+    blob_results = [
+        result
+        for result in results
+        if blob_start <= result.offset and result.offset + window_size <= blob_end
+    ]
+
+    assert blob_results
+    assert all(4.0 < result.entropy < 5.5 for result in blob_results)  # sanity: genuinely ~4.9
+    assert not any(result.is_anomaly for result in blob_results)
+
+    findings, summary = firmware_pipeline._analyze_file_entropy(
+        samples, data, [], "firmware_pipeline", "raw_binary", None, None
+    )
+    assert findings == []
+    assert summary.local_anomaly_candidates == 0
 
 
 def test_high_entropy_region_in_uniform_neighborhood_is_not_a_local_anomaly() -> None:
@@ -497,3 +587,53 @@ def test_original_firmware_untouched_after_pipeline(
 
     assert firmware_path.exists()
     assert hashlib.sha256(firmware_path.read_bytes()).hexdigest() == original_hash
+
+
+def test_filesystem_findings_merge_into_pipeline_and_cleanup_still_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """filesystem.py's checks run automatically on the pipeline's own extraction.
+
+    Reuses the same extraction already on disk (no second extraction) --
+    plants a backdoor-account passwd file under the mocked extracted
+    directory, confirms a module_name="filesystem" finding merges into
+    run_pipeline()'s combined output, and confirms the mandatory cleanup
+    still removes the extracted directory afterward even though
+    filesystem.py contributed findings.
+
+    Args:
+        tmp_path: Pytest-provided temporary directory.
+        monkeypatch: Pytest fixture used to stub Binwalk's extraction/scan
+            and redirect plot output.
+
+    Returns:
+        None.
+
+    Raises:
+        AssertionError: If no filesystem finding is produced, or the
+            extracted directory survives cleanup.
+    """
+    monkeypatch.setattr(config, "DEFAULT_OUTPUT_DIR", tmp_path / "output")
+    # _walk_extracted() also runs against this same directory; stub its
+    # own Binwalk scan so this test doesn't depend on a real install.
+    monkeypatch.setattr(binwalk_wrapper, "scan_file", lambda filepath: [])
+
+    extracted_dir = tmp_path / "_firmware.bin.extracted"
+    (extracted_dir / "etc").mkdir(parents=True)
+    (extracted_dir / "etc" / "passwd").write_text(
+        "root:x:0:0:root:/root:/bin/ash\n"
+        "backdoor:x:0:0:backdoor:/root:/bin/sh\n"
+        "nobody:x:65534:65534:nobody:/:/bin/false\n"
+    )
+    _mock_extract_with_fake_extracted_dir(monkeypatch, extracted_dir)
+
+    firmware_path = tmp_path / "firmware.bin"
+    firmware_path.write_bytes(b"\x00" * 200)
+
+    findings = firmware_pipeline.run_pipeline(str(firmware_path))
+
+    filesystem_findings = [f for f in findings if f.module_name == "filesystem"]
+    assert len(filesystem_findings) == 1
+    assert filesystem_findings[0].severity == "high"
+    assert not extracted_dir.exists()
+    assert firmware_path.exists()
