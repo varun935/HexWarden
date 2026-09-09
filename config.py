@@ -374,6 +374,32 @@ NETWORK_MONITOR_KNOWN_CLOUD_RANGES: List[str] = [
 ]
 
 # --------------------------------------------------------------------------
+# String extraction and pattern matching (modules/strings.py)
+#
+# Pattern content itself lives in config/string_patterns.json (not here)
+# so the pattern library can be edited without touching code -- these are
+# the numeric/behavioral knobs around it.
+# --------------------------------------------------------------------------
+STRING_PATTERNS_PATH: Path = PROJECT_ROOT / "config" / "string_patterns.json"
+STRINGS_MIN_ASCII_LENGTH: int = 4  # shorter runs are mostly noise (padding, opcodes)
+STRINGS_CO_OCCURRENCE_WINDOW_BYTES: int = 512  # cluster radius for severity escalation
+
+# --------------------------------------------------------------------------
+# Web dashboard (web/app.py)
+#
+# Paths are PROJECT_ROOT-relative (not relative to the process's current
+# working directory) so `python3 web/run.py` behaves the same regardless
+# of which directory it's launched from -- matches DEFAULT_OUTPUT_DIR's
+# convention above.
+# --------------------------------------------------------------------------
+WEB_UPLOAD_FOLDER: Path = PROJECT_ROOT / "web" / "uploads"
+WEB_MAX_FIRMWARE_SIZE_MB: int = 500
+WEB_DATABASE_PATH: Path = PROJECT_ROOT / "web" / "hexwarden.db"
+WEB_SECRET_KEY: str = "hexwarden-sih2026"
+WEB_HOST: str = "0.0.0.0"
+WEB_PORT: int = 5000
+
+# --------------------------------------------------------------------------
 # Logging
 # --------------------------------------------------------------------------
 LOG_FORMAT: str = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"

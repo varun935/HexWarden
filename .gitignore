@@ -26,6 +26,16 @@ extractions/
 result.txt
 ses.txt
 
+# ...except the pattern library itself, which is source configuration
+# (modules/strings.py loads it at runtime), not a generated report.
+!config/string_patterns.json
+
+# Web dashboard runtime state -- uploaded firmware (arbitrary extensions,
+# not just .bin/.img) and the local scans database, neither of which
+# belongs in version control.
+web/uploads/
+web/hexwarden.db
+
 # Oversized extracted sample (104MB, exceeds GitHub's 100MB per-file limit)
 golden/openwrt-25.12.5-bcm27xx-bcm2712-rpi-5-ext4-factory.img.extracted/0/Linux_partition.1
 

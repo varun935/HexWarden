@@ -1,37 +1,280 @@
 """Risk scoring and verdict aggregation for HexWarden.
 
-Not yet implemented. Will combine a list of `Finding` objects into a
-single 0-100 risk score (using `config.SEVERITY_SCORE_WEIGHTS`) and a
-verdict string ("clean", "suspicious", "malicious") using
-`config.RISK_VERDICT_SUSPICIOUS_THRESHOLD` and
-`config.RISK_VERDICT_MALICIOUS_THRESHOLD`. Scaffolded now to establish the
-package structure; the aggregation logic lands in a follow-up change.
+Combines findings from every analysis module that ran into one weighted
+verdict. No module's findings are a verdict on their own -- this is
+where cross-module corroboration and severity weighting turn a pile of
+candidates into a single risk picture.
+
+Corroboration: two or more *different* modules independently flagging
+the same byte region (within `CORROBORATION_WINDOW_BYTES`) is a much
+stronger signal than either finding alone, so each finding in such a
+cluster has its weighted contribution boosted by `CORROBORATION_BONUS`.
+Findings with no byte offset (e.g. modules/filesystem.py's checks, which
+are file-path-based, not offset-based) cannot participate -- there's no
+byte region to compare.
 
 Inputs:
     findings (List[Finding]): Findings collected from one or more
-        analysis modules.
+        analysis modules, typically the combined output of a full
+        pipeline run.
+    modules_run (Optional[List[str]]): Which modules were actually
+        invoked this scan (confidence is a fraction of this, not of the
+        fixed MODULE_WEIGHTS registry -- e.g. golden_diff/network_monitor
+        are conditional on optional uploads and shouldn't silently
+        depress confidence when skipped on purpose). Defaults to every
+        module in MODULE_WEIGHTS when not given, i.e. "assume a full
+        pipeline ran" -- the one-argument `score(findings)` call the
+        task's interface specifies still works standalone.
 
 Outputs:
-    Tuple[int, str]: Combined risk score and verdict (currently always
-    raises NotImplementedError until this module is implemented).
+    ScanScore: Combined weighted score, verdict, per-module breakdown,
+    top findings, and corroborated-region findings.
 """
 
-from typing import List, Tuple
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
 
+import config
 from core import Finding
 
+# Per-module, per-severity weight. A CRITICAL from a module that diffs
+# against a known-clean reference (golden_diff) is worth more than a
+# CRITICAL from a purely heuristic pass (strings) -- these are not the
+# same as config.SEVERITY_SCORE_WEIGHTS, which is a single module-agnostic
+# scale used internally by each module for its own Finding.score.
+MODULE_WEIGHTS: Dict[str, Dict[str, int]] = {
+    "yara_engine": {"critical": 90, "high": 65, "medium": 35, "low": 10},
+    "filesystem": {"critical": 80, "high": 60, "medium": 30, "low": 10},
+    "golden_diff": {"critical": 85, "high": 65, "medium": 35, "low": 10},
+    "firmware_pipeline": {"critical": 70, "high": 50, "medium": 25, "low": 8},
+    "firmware_pipeline_extracted": {"critical": 65, "high": 45, "medium": 20, "low": 5},
+    "strings": {"critical": 60, "high": 40, "medium": 20, "low": 5},
+    "network_monitor": {"critical": 75, "high": 55, "medium": 25, "low": 8},
+}
 
-def aggregate(findings: List[Finding]) -> Tuple[int, str]:
-    """Aggregate findings into a combined risk score and verdict.
+CORROBORATION_WINDOW_BYTES = 4096
+CORROBORATION_BONUS = 0.20  # +20% contribution for findings in a corroborated cluster
+
+TOP_FINDINGS_COUNT = 5
+
+# (floor, verdict, color) -- checked highest-first, first match wins.
+_VERDICT_BANDS = [
+    (76, "CRITICAL", "red"),
+    (51, "HIGH", "orange"),
+    (26, "MEDIUM", "yellow"),
+    (0, "LOW", "green"),
+]
+
+
+@dataclass
+class ScanScore:
+    """Combined weighted verdict over every finding from one scan.
+
+    Attributes:
+        total_score: Raw weighted sum across all findings, 0-100+ (not
+            capped -- callers displaying this as "N / 100" should clamp
+            for presentation; the raw value is kept here so a very
+            over-determined scan isn't visually indistinguishable from a
+            borderline one).
+        verdict: "LOW", "MEDIUM", "HIGH", or "CRITICAL".
+        verdict_color: "green", "yellow", "orange", or "red" -- matches
+            `verdict`, for direct use as a CSS class/token.
+        confidence: Fraction (0.0-1.0) of `modules_run` that actually
+            produced at least one finding.
+        module_scores: Per-module weighted score sum (post-corroboration
+            bonus).
+        module_finding_counts: Per-module severity histogram, e.g.
+            {"yara_engine": {"critical": 1, "high": 0, "medium": 2, "low": 0}}.
+        top_findings: Up to `TOP_FINDINGS_COUNT` findings with the
+            highest individual `Finding.score`, descending.
+        corroborated_findings: Findings that share a byte region (within
+            `CORROBORATION_WINDOW_BYTES`) with a finding from a
+            *different* module, sorted by offset.
+        summary: One human-readable sentence describing the verdict.
+    """
+
+    total_score: int
+    verdict: str
+    verdict_color: str
+    confidence: float
+    module_scores: Dict[str, int] = field(default_factory=dict)
+    module_finding_counts: Dict[str, Dict[str, int]] = field(default_factory=dict)
+    top_findings: List[Finding] = field(default_factory=list)
+    corroborated_findings: List[Finding] = field(default_factory=list)
+    summary: str = ""
+
+
+def _verdict_for_score(total_score: int) -> tuple:
+    """Map a raw total score to (verdict, color).
+
+    Args:
+        total_score: Raw weighted score sum.
+
+    Returns:
+        (verdict, verdict_color) tuple.
+
+    Raises:
+        None.
+    """
+    for floor, verdict, color in _VERDICT_BANDS:
+        if total_score >= floor:
+            return verdict, color
+    return "LOW", "green"  # unreachable given a 0 floor, kept as a defensive fallback
+
+
+def _corroborated_clusters(findings: List[Finding]) -> List[List[Finding]]:
+    """Group findings into proximity clusters and keep only multi-module ones.
+
+    Args:
+        findings: All findings (any module).
+
+    Returns:
+        List of clusters (each a list of Finding), one per group of
+        findings within `CORROBORATION_WINDOW_BYTES` of each other that
+        includes findings from 2+ distinct modules. Findings with
+        `offset is None` are excluded -- there's no byte region to
+        compare them by.
+
+    Raises:
+        None.
+    """
+    offset_findings = sorted(
+        (f for f in findings if f.offset is not None), key=lambda f: f.offset
+    )
+    if not offset_findings:
+        return []
+
+    clusters: List[List[Finding]] = []
+    current = [offset_findings[0]]
+    current_max_offset = offset_findings[0].offset
+    for finding in offset_findings[1:]:
+        if finding.offset - current_max_offset <= CORROBORATION_WINDOW_BYTES:
+            current.append(finding)
+            current_max_offset = max(current_max_offset, finding.offset)
+        else:
+            clusters.append(current)
+            current = [finding]
+            current_max_offset = finding.offset
+    clusters.append(current)
+
+    return [
+        cluster
+        for cluster in clusters
+        if len({f.module_name for f in cluster}) >= 2
+    ]
+
+
+def _weight_for(finding: Finding) -> int:
+    """Look up a finding's module-and-severity weight.
+
+    Args:
+        finding: The finding to weight.
+
+    Returns:
+        `MODULE_WEIGHTS[finding.module_name][finding.severity]`, falling
+        back to `config.SEVERITY_SCORE_WEIGHTS[finding.severity]` for a
+        module not in the registry (keeps scoring functional rather than
+        crashing if a new module is added before its weights are).
+
+    Raises:
+        None.
+    """
+    module_weights = MODULE_WEIGHTS.get(finding.module_name)
+    if module_weights is not None and finding.severity in module_weights:
+        return module_weights[finding.severity]
+    return config.SEVERITY_SCORE_WEIGHTS.get(finding.severity, 0)
+
+
+def _build_summary(
+    verdict: str, corroborated_findings: List[Finding], contributing_modules: int
+) -> str:
+    """Build the one-sentence human-readable verdict summary.
+
+    Args:
+        verdict: "LOW", "MEDIUM", "HIGH", or "CRITICAL".
+        corroborated_findings: Findings flagged by 2+ modules.
+        contributing_modules: Count of distinct modules that produced at
+            least one finding.
+
+    Returns:
+        A one-sentence summary.
+
+    Raises:
+        None.
+    """
+    if verdict == "LOW":
+        return "No significant threats detected -- firmware appears clean."
+    if verdict == "CRITICAL":
+        return (
+            f"Critical: strong evidence of embedded malware across "
+            f"{contributing_modules} independent detection layer(s)."
+        )
+    if corroborated_findings:
+        return "Multiple corroborated signals indicate probable firmware tampering."
+    if verdict == "HIGH":
+        return "Strong indicators of tampering found; review flagged findings closely."
+    return "Some suspicious indicators found; manual review recommended."
+
+
+def score(findings: List[Finding], modules_run: Optional[List[str]] = None) -> ScanScore:
+    """Combine findings from all modules into one weighted verdict.
 
     Args:
         findings: Findings collected from one or more analysis modules.
+        modules_run: Which modules were actually invoked this scan.
+            Defaults to every module in `MODULE_WEIGHTS` (i.e. assumes a
+            full pipeline ran) when not given.
 
     Returns:
-        Tuple of (risk_score, verdict), where risk_score is 0-100 and
-        verdict is one of "clean", "suspicious", "malicious".
+        A `ScanScore` combining every finding into one verdict.
 
     Raises:
-        NotImplementedError: Always, until this module is implemented.
+        None.
     """
-    raise NotImplementedError("Risk score aggregation is not implemented yet.")
+    if modules_run is None:
+        modules_run = list(MODULE_WEIGHTS.keys())
+
+    corroborated_clusters = _corroborated_clusters(findings)
+    corroborated_ids = {id(f) for cluster in corroborated_clusters for f in cluster}
+
+    total_score = 0
+    module_scores: Dict[str, int] = {}
+    module_finding_counts: Dict[str, Dict[str, int]] = {}
+
+    for finding in findings:
+        contribution = _weight_for(finding)
+        if id(finding) in corroborated_ids:
+            contribution = round(contribution * (1 + CORROBORATION_BONUS))
+
+        total_score += contribution
+        module_scores[finding.module_name] = module_scores.get(finding.module_name, 0) + contribution
+
+        counts = module_finding_counts.setdefault(
+            finding.module_name, {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
+        )
+        counts[finding.severity] = counts.get(finding.severity, 0) + 1
+
+    verdict, verdict_color = _verdict_for_score(total_score)
+
+    contributing_modules = len(module_scores)
+    confidence = min(1.0, contributing_modules / len(modules_run)) if modules_run else 0.0
+
+    top_findings = sorted(findings, key=lambda f: f.score, reverse=True)[:TOP_FINDINGS_COUNT]
+
+    corroborated_findings = sorted(
+        (f for cluster in corroborated_clusters for f in cluster), key=lambda f: f.offset
+    )
+
+    summary = _build_summary(verdict, corroborated_findings, contributing_modules)
+
+    return ScanScore(
+        total_score=total_score,
+        verdict=verdict,
+        verdict_color=verdict_color,
+        confidence=confidence,
+        module_scores=module_scores,
+        module_finding_counts=module_finding_counts,
+        top_findings=top_findings,
+        corroborated_findings=corroborated_findings,
+        summary=summary,
+    )
