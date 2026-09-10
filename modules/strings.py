@@ -13,15 +13,26 @@ commands, credential-looking assignments, base64 blobs (decoded and
 re-scanned one level deep), and C2-style hardcoded ports.
 
 False-positive discipline: router firmware legitimately contains IPs
-(NTP, DNS), shell references (init scripts), and URLs (update servers).
-A single, isolated match of any pattern defaults to LOW (or MEDIUM for
-the more inherently sensitive categories -- credentials, C2 ports) and is
-never treated as a verdict on its own; only *co-occurrence* -- multiple
-suspicious strings clustered within
-`config.STRINGS_CO_OCCURRENCE_WINDOW_BYTES` of each other -- escalates
-severity. `config.NETWORK_MONITOR_KNOWN_CLOUD_RANGES`-style allowlists
+(NTP, DNS), shell references (init scripts), and URLs (update servers);
+ESP-IDF/embedded firmware additionally contains large debug-symbol
+tables (function names, compiler/toolchain file paths) that happen to
+sit inside the base64 charset. A single, isolated match of any pattern
+defaults to LOW (or MEDIUM for the more inherently sensitive categories
+-- credentials, C2 ports) and is never treated as a verdict on its own;
+only *co-occurrence across different categories* -- e.g. a shell_command
+AND a hardcoded_ip within `config.STRINGS_CO_OCCURRENCE_WINDOW_BYTES` of
+each other -- escalates severity. Multiple matches of the *same*
+category clustered together (a whole symbol table of base64-looking
+strings, say) do NOT escalate each other -- that was a real bug: a
+debug-symbol table could mass-escalate itself to CRITICAL purely by
+being long, with no actual heterogeneous suspicion behind it.
+`config.NETWORK_MONITOR_KNOWN_CLOUD_RANGES`-style allowlists
 (`allowlisted_ips`, `allowlisted_domains` in the pattern file) suppress
-the common legitimate offenders outright.
+the common legitimate offenders outright. base64_blob candidates are
+additionally filtered by `_is_valid_base64_candidate()` -- length,
+character-density, and shape checks that reject file paths, whitespace-
+free identifiers, and camelCase function names before they ever reach
+scoring.
 
 Inputs:
     filepath (str): Path to a firmware binary file to analyze.
@@ -82,6 +93,16 @@ _CONFIDENCE_CATEGORY_ADJUSTMENT = {
 _MATCHED_STRING_PREVIEW_LENGTH = 100
 _BASE64_MAX_DECODE_LENGTH = 4096  # cap decode/re-scan cost on pathological runs
 
+# base64_blob false-positive-discipline thresholds (see
+# `_is_valid_base64_candidate()`). Local to this module rather than
+# config.py -- these are shape/plausibility heuristics for one detection
+# category, not a tunable a user would reasonably want to retune per
+# firmware target.
+_BASE64_MIN_LENGTH = 40  # below this, "looks like base64" is too common to be useful
+_BASE64_MAX_CAMELCASE_TRANSITIONS = 2  # function names (xQueueReceiveFromISR) have many
+_BASE64_MIN_SYMBOL_DENSITY = 0.30  # fraction that must be digits or + / =
+_CAMELCASE_TRANSITION_RE = re.compile(r"[a-z][A-Z]")
+
 _ASCII_STRING_RE = re.compile(
     rb"[\x20-\x7e]{" + str(config.STRINGS_MIN_ASCII_LENGTH).encode() + rb",}"
 )
@@ -93,8 +114,49 @@ _DOMAIN_RE = re.compile(
     r"\b[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?"
     r"(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+\b"
 )
-_BASE64_BLOB_RE = re.compile(r"[A-Za-z0-9+/]{20,}={0,2}")
+_BASE64_BLOB_RE = re.compile(r"[A-Za-z0-9+/]{" + str(_BASE64_MIN_LENGTH) + r",}={0,2}")
 _C2_PORT_RE = re.compile(r":(\d{4,5})\b")
+
+
+def _is_valid_base64_candidate(blob: str) -> bool:
+    """Apply false-positive-discipline checks to a base64-charset match.
+
+    The bare `_BASE64_BLOB_RE` character class already can't match
+    whitespace, `.`, or `\\` (they're not in `[A-Za-z0-9+/]`), so those
+    checks below are currently unreachable in practice -- kept anyway as
+    explicit, self-documenting guards rather than relying on that being
+    true forever. `/` and a leading `@` ARE reachable today (`/` is a
+    legal base64 character; ESP-IDF/embedded firmware's compiler/toolchain
+    file paths like "components/esp32/include/esp_wifi.h" are pure
+    `[A-Za-z0-9+/]` and were the actual source of the false-positive flood
+    this function exists to fix), so those two checks carry real weight.
+
+    Args:
+        blob: The raw regex match text (before any length truncation).
+
+    Returns:
+        True if `blob` plausibly looks like encoded data rather than an
+        identifier, file path, or natural-language word run.
+
+    Raises:
+        None.
+    """
+    if len(blob) < _BASE64_MIN_LENGTH:
+        return False
+    if any(separator in blob for separator in ("/", "\\", ".")):
+        return False
+    if any(character.isspace() for character in blob):
+        return False
+    if "_" in blob:
+        return False
+    if len(_CAMELCASE_TRANSITION_RE.findall(blob)) > _BASE64_MAX_CAMELCASE_TRANSITIONS:
+        return False
+    symbol_count = sum(1 for character in blob if character.isdigit() or character in "+/=")
+    if symbol_count / len(blob) < _BASE64_MIN_SYMBOL_DENSITY:
+        return False
+    if blob.startswith("/") or blob.startswith("@"):
+        return False
+    return True
 
 
 @dataclass
@@ -262,6 +324,8 @@ def _scan_text(
 
     for base64_match in _BASE64_BLOB_RE.finditer(text):
         blob = base64_match.group()
+        if not _is_valid_base64_candidate(blob):
+            continue
         blob_offset = offset + base64_match.start()
         decoded_bytes = _decode_base64_blob(blob) if allow_nested_base64 else None
         decoded_preview = (
@@ -308,56 +372,70 @@ def _decode_base64_blob(blob: str) -> Optional[bytes]:
         return None
 
 
-def _cluster_sizes(offsets: List[int]) -> List[int]:
-    """Compute, for each offset, the count of offsets within the co-occurrence window.
+def _cluster_category_counts(matches: List[_RawMatch]) -> List[int]:
+    """Compute, for each match, the count of DISTINCT categories within the co-occurrence window.
+
+    Escalation is driven by category diversity, not raw match volume: a
+    debug-symbol table full of same-category base64_blob matches sitting
+    next to each other must not mass-escalate itself to CRITICAL just by
+    being long. Two matches of the same category 500 bytes apart is
+    normal, uninteresting clustering (a symbol table, a run of similar
+    strings); a shell_command sitting next to a hardcoded_ip is a real
+    heterogeneous signal.
 
     Args:
-        offsets: Sorted list of match offsets.
+        matches: Matches sorted by `offset` ascending (caller's
+            responsibility -- `analyze()` already sorts before calling
+            this).
 
     Returns:
-        List parallel to `offsets`: for each index, the number of
-        offsets (including itself) within
-        `config.STRINGS_CO_OCCURRENCE_WINDOW_BYTES` bytes.
+        List parallel to `matches`: for each index, the number of
+        distinct `category` values (including its own) among matches
+        within `config.STRINGS_CO_OCCURRENCE_WINDOW_BYTES` bytes.
 
     Raises:
         None.
     """
     window = config.STRINGS_CO_OCCURRENCE_WINDOW_BYTES
-    sizes = [0] * len(offsets)
+    counts = [0] * len(matches)
     left = 0
     right = 0
-    n = len(offsets)
-    for i, current in enumerate(offsets):
-        while left < n and offsets[left] < current - window:
+    n = len(matches)
+    for i, match in enumerate(matches):
+        current = match.offset
+        while left < n and matches[left].offset < current - window:
             left += 1
         if right < i:
             right = i
-        while right < n and offsets[right] <= current + window:
+        while right < n and matches[right].offset <= current + window:
             right += 1
-        sizes[i] = right - left
-    return sizes
+        counts[i] = len({m.category for m in matches[left:right]})
+    return counts
 
 
-def _severity_for_match(category: str, cluster_size: int) -> str:
-    """Determine a match's final severity from its category and cluster size.
+def _severity_for_match(category: str, category_count: int) -> str:
+    """Determine a match's final severity from its category and co-occurring category diversity.
 
     Args:
         category: Pattern category.
-        cluster_size: Number of suspicious matches (including this one)
-            within the co-occurrence window (see `_cluster_sizes()`).
+        category_count: Number of DISTINCT suspicious-string categories
+            (including this match's own) within the co-occurrence window
+            (see `_cluster_category_counts()`).
 
     Returns:
         "low", "medium", "high", or "critical" -- co-occurrence only ever
-        raises the category's base severity, never lowers it (two
-        co-occurring matches = HIGH, three or more = CRITICAL).
+        raises the category's base severity, never lowers it. Two
+        distinct co-occurring categories = HIGH, three or more =
+        CRITICAL. Any number of matches of the SAME category clustered
+        together leaves `category_count` at 1 and does not escalate.
 
     Raises:
         None.
     """
     base_severity = _BASE_SEVERITY_BY_CATEGORY.get(category, "low")
-    if cluster_size >= 3:
+    if category_count >= 3:
         cluster_severity = "critical"
-    elif cluster_size == 2:
+    elif category_count == 2:
         cluster_severity = "high"
     else:
         cluster_severity = base_severity
@@ -385,26 +463,29 @@ def _confidence_for_match(category: str, severity: str) -> float:
     return max(0.0, min(1.0, confidence))
 
 
-def _describe(category: str, matched_pattern: str, cluster_size: int) -> str:
+def _describe(category: str, matched_pattern: str, category_count: int) -> str:
     """Build a human-readable description for a match.
 
     Args:
         category: Pattern category.
         matched_pattern: The specific pattern/keyword that matched.
-        cluster_size: Number of suspicious matches within the
-            co-occurrence window.
+        category_count: Number of distinct suspicious-string categories
+            within the co-occurrence window (see
+            `_cluster_category_counts()`).
 
     Returns:
-        A one-sentence description, noting co-occurrence when it drove
-        the severity.
+        A one-sentence description, noting cross-category co-occurrence
+        when it drove the severity.
 
     Raises:
         None.
     """
     label = category.replace("_", " ")
     description = f"Suspicious {label} string matched {matched_pattern!r}"
-    if cluster_size >= 2:
-        description += f" (co-occurring with {cluster_size - 1} other suspicious string(s) nearby)"
+    if category_count >= 2:
+        other = category_count - 1
+        noun = "category" if other == 1 else "categories"
+        description += f" (co-occurring with {other} other suspicious {noun} nearby)"
     return description
 
 
@@ -447,18 +528,22 @@ def analyze(filepath: str) -> List[Finding]:
         return []
 
     raw_matches.sort(key=lambda match: match.offset)
-    cluster_sizes = _cluster_sizes([match.offset for match in raw_matches])
+    category_counts = _cluster_category_counts(raw_matches)
 
     findings: List[Finding] = []
-    for match, cluster_size in zip(raw_matches, cluster_sizes):
-        severity = _severity_for_match(match.category, cluster_size)
+    for match, category_count in zip(raw_matches, category_counts):
+        severity = _severity_for_match(match.category, category_count)
         confidence = _confidence_for_match(match.category, severity)
         raw: Dict = {
             "matched_pattern": match.matched_pattern,
             "matched_string": match.matched_string[:_MATCHED_STRING_PREVIEW_LENGTH],
             "category": match.category,
             "offset": match.offset,
-            "co_occurring_count": cluster_size,
+            # Distinct co-occurring categories within the window (see
+            # `_cluster_category_counts()`), NOT a raw match count --
+            # kept under this key name for backward compatibility with
+            # existing readers (e.g. the web dashboard).
+            "co_occurring_count": category_count,
             "confidence": confidence,
         }
         if match.base64_decoded is not None:
@@ -469,7 +554,7 @@ def analyze(filepath: str) -> List[Finding]:
                 module_name=MODULE_NAME,
                 severity=severity,
                 offset=match.offset,
-                description=_describe(match.category, match.matched_pattern, cluster_size),
+                description=_describe(match.category, match.matched_pattern, category_count),
                 evidence=match.matched_string[:_MATCHED_STRING_PREVIEW_LENGTH],
                 score=config.SEVERITY_SCORE_WEIGHTS[severity],
                 raw=raw,

@@ -65,8 +65,11 @@ Inputs:
     filepath (str): Path to a firmware binary file to analyze.
 
 Outputs:
-    List[Finding]: Candidate findings from the raw-binary scan
-    (module_name="firmware_pipeline"), the extracted-file entropy walk
+    List[Finding]: Candidate findings from the raw-binary entropy scan
+    (module_name="firmware_pipeline"), an unconditional raw-binary YARA
+    pass (module_name="yara_engine_raw") and strings pass
+    (module_name="strings_raw") that run regardless of whether Binwalk
+    extraction produced anything, the extracted-file entropy walk
     (module_name="firmware_pipeline_extracted"), and the filesystem
     checks (module_name="filesystem"). As a side effect, a combined
     entropy plot is written under the configured output directory
@@ -84,13 +87,20 @@ from typing import Dict, List, Optional, Tuple
 
 import config
 from core import AnalysisError, Finding
-from modules import binwalk_wrapper, entropy, filesystem
+from modules import binwalk_wrapper, entropy, filesystem, strings, yara_engine
 from modules.binwalk_wrapper import BinwalkRegion, BinwalkResult
 
 logger = logging.getLogger(__name__)
 
 MODULE_NAME = "firmware_pipeline"
 EXTRACTED_MODULE_NAME = "firmware_pipeline_extracted"
+YARA_RAW_MODULE_NAME = "yara_engine_raw"
+STRINGS_RAW_MODULE_NAME = "strings_raw"
+
+# Rules directory for the raw-binary YARA pass -- same location
+# web/app.py's dashboard pipeline uses for its own (extracted-file-scoped)
+# YaraEngine instance.
+_YARA_RULES_DIR = config.PROJECT_ROOT / "rules"
 
 # A (start, end, keyword, description, expected_min, expected_max) tuple
 # describing one Binwalk region matched against config.FORMAT_ENTROPY_RANGES,
@@ -1052,6 +1062,114 @@ def _run_filesystem_checks(extracted_dir: Path) -> List[Finding]:
         return []
 
 
+def _yara_finding_to_core(yara_finding: "yara_engine.Finding") -> Finding:
+    """Adapt a modules/yara_engine.py Finding to core.Finding.
+
+    yara_engine.py predates core.Finding and defines its own, differently
+    shaped Finding dataclass (no `module_name`, `evidence`, or `raw`
+    fields) -- see its module docstring. Everything YARA-specific (rule
+    name, tags, matched strings, baseline-suppression state) is preserved
+    in `raw`. Mirrors web/app.py's `_yara_finding_to_core()` (that one
+    tags module_name="yara_engine" for the extracted-file/dashboard scan;
+    this one tags "yara_engine_raw" for the raw-binary pass below).
+
+    Args:
+        yara_finding: A finding from `YaraEngine.scan_file()`.
+
+    Returns:
+        The equivalent `core.Finding`, tagged `module_name="yara_engine_raw"`.
+
+    Raises:
+        None.
+    """
+    severity = (
+        yara_finding.severity if yara_finding.severity in config.SEVERITY_SCORE_WEIGHTS else "info"
+    )
+    return Finding(
+        module_name=YARA_RAW_MODULE_NAME,
+        severity=severity,
+        offset=yara_finding.offset,
+        description=yara_finding.description or f"YARA rule {yara_finding.rule!r} matched",
+        evidence=yara_finding.rule,
+        score=config.SEVERITY_SCORE_WEIGHTS.get(severity, 0),
+        raw={
+            "rule": yara_finding.rule,
+            "namespace": yara_finding.namespace,
+            "category": yara_finding.category,
+            "file_path": yara_finding.file_path,
+            "file_sha256": yara_finding.file_sha256,
+            "tags": yara_finding.tags,
+            "meta": yara_finding.meta,
+            "matched_strings": [
+                {"identifier": s.identifier, "offset": s.offset, "preview": s.preview}
+                for s in yara_finding.strings
+            ],
+        },
+    )
+
+
+def _run_raw_yara_scan(path: Path) -> List[Finding]:
+    """Run YARA against the raw firmware binary, unconditionally.
+
+    Unlike the extracted-file YARA pass a caller might run separately,
+    this always runs against `path` itself -- including firmware Binwalk
+    can't extract anything from at all (e.g. ESP32 bare-metal images),
+    where the extracted-file-only path would otherwise never see YARA
+    run at all. Best-effort: a compile/scan failure is logged and treated
+    as zero findings, never aborting the rest of the pipeline.
+
+    Args:
+        path: Path to the raw firmware binary.
+
+    Returns:
+        Findings adapted via `_yara_finding_to_core()`, module_name
+        "yara_engine_raw". Empty list on failure or if every match is
+        baseline-suppressed (moot here -- no baseline is loaded).
+
+    Raises:
+        None.
+    """
+    try:
+        engine = yara_engine.YaraEngine(str(_YARA_RULES_DIR)).compile()
+        raw_matches = engine.scan_file(path)
+        return [
+            _yara_finding_to_core(match) for match in raw_matches if not match.suppressed_by_baseline
+        ]
+    except Exception:
+        logger.exception("Raw binary YARA scan failed, continuing without it")
+        return []
+
+
+def _run_raw_strings_scan(path: Path) -> List[Finding]:
+    """Run modules/strings.py against the raw firmware binary, unconditionally.
+
+    Same rationale as `_run_raw_yara_scan()`: this must run regardless of
+    whether Binwalk extraction succeeded. `strings.analyze()` already
+    returns proper `core.Finding` objects (module_name="strings"); each
+    is retagged "strings_raw" here so raw-binary matches stay
+    distinguishable from extracted-file string matches in the combined
+    report.
+
+    Args:
+        path: Path to the raw firmware binary.
+
+    Returns:
+        Findings from `strings.analyze()`, retagged module_name
+        "strings_raw". Empty list on failure.
+
+    Raises:
+        None.
+    """
+    try:
+        raw_findings = strings.analyze(str(path))
+    except Exception:
+        logger.exception("Raw binary strings scan failed, continuing without it")
+        return []
+    for finding in raw_findings:
+        finding.module_name = STRINGS_RAW_MODULE_NAME
+    return raw_findings
+
+
 def run_pipeline_with_summary(filepath: str) -> Tuple[List[Finding], EntropySummary]:
     """Run the full context-aware pipeline, returning findings and the entropy summary.
 
@@ -1101,6 +1219,20 @@ def run_pipeline_with_summary(filepath: str) -> Tuple[List[Finding], EntropySumm
             raw_summary.local_anomaly_candidates,
             raw_summary.whole_file_anomalies,
         )
+
+        # Unconditional -- runs regardless of whether Binwalk could
+        # extract anything (extracted_dir may be None here, e.g. ESP32
+        # bare-metal images Binwalk doesn't recognize at all). Without
+        # this, firmware Binwalk can't extract never gets a YARA or
+        # strings pass at all, since every other YARA/strings call in
+        # this pipeline is scoped to the extracted tree below.
+        raw_yara_findings = _run_raw_yara_scan(path)
+        all_findings.extend(raw_yara_findings)
+        logger.info("YARA raw binary scan: %d finding(s)", len(raw_yara_findings))
+
+        raw_strings_findings = _run_raw_strings_scan(path)
+        all_findings.extend(raw_strings_findings)
+        logger.info("Strings raw binary scan: %d finding(s)", len(raw_strings_findings))
 
         extracted_findings: List[Finding] = []
         extracted_file_offsets: Dict[str, int] = {}

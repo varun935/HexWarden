@@ -18,13 +18,17 @@ Inputs:
         analysis modules, typically the combined output of a full
         pipeline run.
     modules_run (Optional[List[str]]): Which modules were actually
-        invoked this scan (confidence is a fraction of this, not of the
-        fixed MODULE_WEIGHTS registry -- e.g. golden_diff/network_monitor
-        are conditional on optional uploads and shouldn't silently
-        depress confidence when skipped on purpose). Defaults to every
-        module in MODULE_WEIGHTS when not given, i.e. "assume a full
-        pipeline ran" -- the one-argument `score(findings)` call the
-        task's interface specifies still works standalone.
+        invoked this scan -- confidence is `len(modules_run) /
+        len(MODULE_WEIGHTS)`, i.e. what fraction of the full detection
+        registry actually checked this firmware (a module that ran and
+        found nothing still counts; it's a passed check, not missing
+        evidence). Pass this explicitly whenever golden_diff/
+        network_monitor are conditionally skipped (no golden reference/
+        pcap provided) so confidence isn't silently inflated as if they
+        ran. Defaults to every module in MODULE_WEIGHTS when not given,
+        i.e. "assume a full pipeline ran" -- the one-argument
+        `score(findings)` call the task's interface specifies still
+        works standalone.
 
 Outputs:
     ScanScore: Combined weighted score, verdict, per-module breakdown,
@@ -43,13 +47,15 @@ from core import Finding
 # same as config.SEVERITY_SCORE_WEIGHTS, which is a single module-agnostic
 # scale used internally by each module for its own Finding.score.
 MODULE_WEIGHTS: Dict[str, Dict[str, int]] = {
-    "yara_engine": {"critical": 90, "high": 65, "medium": 35, "low": 10},
-    "filesystem": {"critical": 80, "high": 60, "medium": 30, "low": 10},
-    "golden_diff": {"critical": 85, "high": 65, "medium": 35, "low": 10},
-    "firmware_pipeline": {"critical": 70, "high": 50, "medium": 25, "low": 8},
-    "firmware_pipeline_extracted": {"critical": 65, "high": 45, "medium": 20, "low": 5},
-    "strings": {"critical": 60, "high": 40, "medium": 20, "low": 5},
-    "network_monitor": {"critical": 75, "high": 55, "medium": 25, "low": 8},
+    "yara_engine": {"critical": 90, "high": 65, "medium": 35, "low": 5},
+    "yara_engine_raw": {"critical": 90, "high": 65, "medium": 35, "low": 5},
+    "filesystem": {"critical": 80, "high": 60, "medium": 30, "low": 5},
+    "golden_diff": {"critical": 85, "high": 65, "medium": 35, "low": 5},
+    "firmware_pipeline": {"critical": 70, "high": 50, "medium": 20, "low": 3},
+    "firmware_pipeline_extracted": {"critical": 65, "high": 45, "medium": 15, "low": 2},
+    "strings": {"critical": 60, "high": 40, "medium": 15, "low": 2},
+    "strings_raw": {"critical": 60, "high": 40, "medium": 15, "low": 2},
+    "network_monitor": {"critical": 75, "high": 55, "medium": 25, "low": 5},
 }
 
 CORROBORATION_WINDOW_BYTES = 4096
@@ -71,16 +77,22 @@ class ScanScore:
     """Combined weighted verdict over every finding from one scan.
 
     Attributes:
-        total_score: Raw weighted sum across all findings, 0-100+ (not
-            capped -- callers displaying this as "N / 100" should clamp
-            for presentation; the raw value is kept here so a very
-            over-determined scan isn't visually indistinguishable from a
-            borderline one).
-        verdict: "LOW", "MEDIUM", "HIGH", or "CRITICAL".
+        total_score: Normalized 0-100 display score --
+            `min(100, int(raw_weighted_sum / config.SCORING_EXPECTED_MAX * 100))`.
+            The raw, uncapped weighted sum (MODULE_WEIGHTS contributions,
+            post-corroboration bonus) is an internal computation detail,
+            not exposed on this dataclass -- `config.SCORING_EXPECTED_MAX`
+            is "how much raw weighted signal is unambiguously Critical".
+        verdict: "LOW", "MEDIUM", "HIGH", or "CRITICAL" -- derived from
+            the normalized `total_score`.
         verdict_color: "green", "yellow", "orange", or "red" -- matches
             `verdict`, for direct use as a CSS class/token.
-        confidence: Fraction (0.0-1.0) of `modules_run` that actually
-            produced at least one finding.
+        confidence: Fraction (0.0-1.0) of the full `MODULE_WEIGHTS`
+            registry that `modules_run` actually invoked this scan --
+            NOT the fraction that produced findings. A module that ran
+            and found nothing is a positive signal (the firmware passed
+            that check), not an absence of evidence, so it must not
+            depress confidence.
         module_scores: Per-module weighted score sum (post-corroboration
             bonus).
         module_finding_counts: Per-module severity histogram, e.g.
@@ -104,11 +116,12 @@ class ScanScore:
     summary: str = ""
 
 
-def _verdict_for_score(total_score: int) -> tuple:
-    """Map a raw total score to (verdict, color).
+def _verdict_for_score(display_score: int) -> tuple:
+    """Map a normalized 0-100 display score to (verdict, color).
 
     Args:
-        total_score: Raw weighted score sum.
+        display_score: Normalized score (see `ScanScore.total_score`),
+            not the raw weighted sum.
 
     Returns:
         (verdict, verdict_color) tuple.
@@ -117,7 +130,7 @@ def _verdict_for_score(total_score: int) -> tuple:
         None.
     """
     for floor, verdict, color in _VERDICT_BANDS:
-        if total_score >= floor:
+        if display_score >= floor:
             return verdict, color
     return "LOW", "green"  # unreachable given a 0 floor, kept as a defensive fallback
 
@@ -185,35 +198,34 @@ def _weight_for(finding: Finding) -> int:
     return config.SEVERITY_SCORE_WEIGHTS.get(finding.severity, 0)
 
 
-def _build_summary(
-    verdict: str, corroborated_findings: List[Finding], contributing_modules: int
-) -> str:
+def _build_summary(display_score: int, modules_with_findings: int) -> str:
     """Build the one-sentence human-readable verdict summary.
 
     Args:
-        verdict: "LOW", "MEDIUM", "HIGH", or "CRITICAL".
-        corroborated_findings: Findings flagged by 2+ modules.
-        contributing_modules: Count of distinct modules that produced at
-            least one finding.
+        display_score: Normalized 0-100 score (see `ScanScore.total_score`).
+        modules_with_findings: Count of distinct modules that produced at
+            least one finding -- used only in the CRITICAL branch, to
+            name how many independent detection layers corroborate the
+            verdict.
 
     Returns:
-        A one-sentence summary.
+        A one-sentence summary, banded on the same 0-100 scale as the
+        verdict thresholds (<=25 LOW, <=50 MEDIUM, <=75 HIGH, else
+        CRITICAL).
 
     Raises:
         None.
     """
-    if verdict == "LOW":
-        return "No significant threats detected -- firmware appears clean."
-    if verdict == "CRITICAL":
-        return (
-            f"Critical: strong evidence of embedded malware across "
-            f"{contributing_modules} independent detection layer(s)."
-        )
-    if corroborated_findings:
-        return "Multiple corroborated signals indicate probable firmware tampering."
-    if verdict == "HIGH":
-        return "Strong indicators of tampering found; review flagged findings closely."
-    return "Some suspicious indicators found; manual review recommended."
+    if display_score <= 25:
+        return "No significant threats detected -- firmware appears clean across all detection layers."
+    if display_score <= 50:
+        return "Some anomalies detected -- manual review recommended but no confirmed malicious indicators."
+    if display_score <= 75:
+        return "Multiple suspicious indicators found -- firmware should be inspected before deployment."
+    return (
+        f"Critical: strong evidence of embedded malware across "
+        f"{modules_with_findings} independent detection layer(s). Do not deploy."
+    )
 
 
 def score(findings: List[Finding], modules_run: Optional[List[str]] = None) -> ScanScore:
@@ -237,7 +249,7 @@ def score(findings: List[Finding], modules_run: Optional[List[str]] = None) -> S
     corroborated_clusters = _corroborated_clusters(findings)
     corroborated_ids = {id(f) for cluster in corroborated_clusters for f in cluster}
 
-    total_score = 0
+    raw_score = 0
     module_scores: Dict[str, int] = {}
     module_finding_counts: Dict[str, Dict[str, int]] = {}
 
@@ -246,7 +258,7 @@ def score(findings: List[Finding], modules_run: Optional[List[str]] = None) -> S
         if id(finding) in corroborated_ids:
             contribution = round(contribution * (1 + CORROBORATION_BONUS))
 
-        total_score += contribution
+        raw_score += contribution
         module_scores[finding.module_name] = module_scores.get(finding.module_name, 0) + contribution
 
         counts = module_finding_counts.setdefault(
@@ -254,10 +266,16 @@ def score(findings: List[Finding], modules_run: Optional[List[str]] = None) -> S
         )
         counts[finding.severity] = counts.get(finding.severity, 0) + 1
 
-    verdict, verdict_color = _verdict_for_score(total_score)
+    display_score = min(100, int(raw_score / config.SCORING_EXPECTED_MAX * 100))
+    verdict, verdict_color = _verdict_for_score(display_score)
 
-    contributing_modules = len(module_scores)
-    confidence = min(1.0, contributing_modules / len(modules_run)) if modules_run else 0.0
+    # "Modules that ran" (positive signal -- a module that ran and found
+    # nothing means the firmware passed that check) drives confidence.
+    # "Modules that found something" is a different metric, kept
+    # separately for the CRITICAL summary sentence's "independent
+    # detection layers" count -- conflating the two was the original bug.
+    confidence = min(1.0, len(modules_run) / len(MODULE_WEIGHTS)) if MODULE_WEIGHTS else 0.0
+    modules_with_findings = len(module_scores)
 
     top_findings = sorted(findings, key=lambda f: f.score, reverse=True)[:TOP_FINDINGS_COUNT]
 
@@ -265,10 +283,10 @@ def score(findings: List[Finding], modules_run: Optional[List[str]] = None) -> S
         (f for cluster in corroborated_clusters for f in cluster), key=lambda f: f.offset
     )
 
-    summary = _build_summary(verdict, corroborated_findings, contributing_modules)
+    summary = _build_summary(display_score, modules_with_findings)
 
     return ScanScore(
-        total_score=total_score,
+        total_score=display_score,
         verdict=verdict,
         verdict_color=verdict_color,
         confidence=confidence,

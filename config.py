@@ -54,6 +54,19 @@ RISK_VERDICT_SUSPICIOUS_THRESHOLD: int = 40  # combined score above this -> "sus
 RISK_VERDICT_MALICIOUS_THRESHOLD: int = 75  # combined score above this -> "malicious"
 
 # --------------------------------------------------------------------------
+# Scoring engine normalization (core/scoring.py)
+#
+# core/scoring.py sums MODULE_WEIGHTS contributions (post-corroboration
+# bonus) across every finding into a raw, uncapped score, then normalizes
+# it to a 0-100 display score via min(100, int(raw / SCORING_EXPECTED_MAX
+# * 100)) -- SCORING_EXPECTED_MAX is "how much raw weighted signal is
+# unambiguously Critical". Tuned empirically against real firmware: a
+# clean DD-WRT run's ~8 LOW/MEDIUM entropy-anomaly findings should land
+# in the 0-25 (LOW) band; a trojaned run's findings should clear 50+.
+# --------------------------------------------------------------------------
+SCORING_EXPECTED_MAX: int = 500
+
+# --------------------------------------------------------------------------
 # Module enable/disable flags
 # --------------------------------------------------------------------------
 ENABLED_MODULES: dict = {
