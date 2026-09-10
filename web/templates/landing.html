@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HexWarden &mdash; Firmware Malware Detection</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  {% include "_nav.html" %}
+  <div class="page landing">
+    <section class="hero">
+      <h1 class="hero-headline">Firmware Malware Detection for Critical Infrastructure</h1>
+      <p class="hero-sub">
+        Multi-layer static and dynamic analysis pipeline &mdash; catches what antivirus can't see
+      </p>
+      <div class="hero-cta">
+        <a class="primary-btn hero-btn" href="/dashboard">Analyse Firmware</a>
+        <a class="secondary-btn hero-btn" href="https://github.com/varun935/HexWarden"
+           target="_blank" rel="noopener">View on GitHub</a>
+      </div>
+    </section>
+
+    <section class="feature-cards">
+      <div class="feature-card">
+        <h3>Multi-Layer Detection</h3>
+        <p>
+          Entropy analysis, YARA signatures, filesystem forensics, string analysis,
+          golden-image diff, network monitoring &mdash; no single signal issues a verdict.
+        </p>
+      </div>
+      <div class="feature-card">
+        <h3>Two Operating Modes</h3>
+        <p>
+          Golden-image comparison when a clean reference exists. Heuristic pipeline when it
+          doesn't. Adapts to what you have.
+        </p>
+      </div>
+      <div class="feature-card">
+        <h3>Built for Power Sector</h3>
+        <p>
+          Detects the class of dormant hardware trojans (Industroyer, Triton, HAVEX) that sit
+          below the OS and activate on command.
+        </p>
+      </div>
+    </section>
+
+    <section class="stats-bar">
+      <span>6 Detection Layers</span>
+      <span>2 Operating Modes</span>
+      <span>Real Firmware Validated</span>
+      <span>Open Source</span>
+    </section>
+
+    <footer class="site-footer">
+      SIH1387 &bull; Ministry of Power &bull; Blockchain &amp; Cybersecurity &bull; Team HexWarden
+    </footer>
+  </div>
+</body>
+</html>

@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>About &mdash; HexWarden</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  {% include "_nav.html" %}
+  <div class="page">
+    <section class="about-section">
+      <h2>The Problem</h2>
+      <p>
+        Malware hidden in power sector hardware firmware sits below the OS, invisible to
+        antivirus, and can trigger blackouts on command. Industroyer did exactly this to
+        Ukraine's power grid in 2016.
+      </p>
+    </section>
+
+    <section class="about-section">
+      <h2>How HexWarden Works</h2>
+      <div class="module-grid">
+        <div class="module-info-card">
+          <span class="module-info-icon">EA</span>
+          <h3>Entropy Analysis</h3>
+          <p>Detects encrypted/compressed payloads using CFAR guard-band local contrast.</p>
+        </div>
+        <div class="module-info-card">
+          <span class="module-info-icon">GD</span>
+          <h3>Golden-Image Diff</h3>
+          <p>Content-defined chunking finds exactly what changed between clean and suspect firmware.</p>
+        </div>
+        <div class="module-info-card">
+          <span class="module-info-icon">YE</span>
+          <h3>YARA Engine</h3>
+          <p>Matches known ICS malware signatures (Industroyer, Triton, BlackEnergy, HAVEX).</p>
+        </div>
+        <div class="module-info-card">
+          <span class="module-info-icon">FF</span>
+          <h3>Filesystem Forensics</h3>
+          <p>Catches backdoor accounts, suspicious cron jobs, pre-installed SSH keys.</p>
+        </div>
+        <div class="module-info-card">
+          <span class="module-info-icon">SA</span>
+          <h3>String Analysis</h3>
+          <p>Finds hardcoded C2 IPs, shell commands, credentials in binary firmware.</p>
+        </div>
+        <div class="module-info-card">
+          <span class="module-info-icon">NM</span>
+          <h3>Network Monitor</h3>
+          <p>Detects C2 beacon timing, DNS tunneling, suspicious outbound connections.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="about-section">
+      <h2>The Team</h2>
+      <div class="team-meta">
+        <p><strong>Team name:</strong> HexWarden</p>
+        <p><strong>Institution:</strong> Thapar Institute of Engineering &amp; Technology</p>
+        <p>
+          <strong>Problem Statement:</strong> SIH1387 &mdash; Detection of Embedded
+          Malware/Trojan in Hardware Devices (Power Sector)
+        </p>
+        <p><strong>Theme:</strong> Blockchain &amp; Cybersecurity &nbsp;|&nbsp;
+          <strong>Category:</strong> Hardware</p>
+        <p>
+          <strong>GitHub:</strong>
+          <a href="https://github.com/varun935/HexWarden" target="_blank" rel="noopener">
+            github.com/varun935/HexWarden</a>
+        </p>
+      </div>
+      <div class="team-grid">
+        <div class="member-card">
+          <span class="member-name">Varun Chaitenya Sharma</span>
+          <span class="member-role">Team Lead, Core Architecture, Reverse Engineering</span>
+        </div>
+        <div class="member-card">
+          <span class="member-name">Tejas Wasan</span>
+          <span class="member-role">YARA Engine, String Analysis</span>
+        </div>
+        <div class="member-card">
+          <span class="member-name">Dhairya Mittal</span>
+          <span class="member-role">Hardware, Side-Channel Analysis</span>
+        </div>
+        <div class="member-card">
+          <span class="member-name">Dakshit Chopra</span>
+          <span class="member-role">Hardware, Firmware Extraction</span>
+        </div>
+        <div class="member-card">
+          <span class="member-name">Viresh Arora</span>
+          <span class="member-role">Report Generation, Testing</span>
+        </div>
+        <div class="member-card">
+          <span class="member-name">Jayana Sapra</span>
+          <span class="member-role">Documentation, Scoring Engine</span>
+        </div>
+      </div>
+    </section>
+  </div>
+</body>
+</html>

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HexWarden</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  {% include "_nav.html" %}
+  <div class="page">
+    <header class="page-header">
+      <h1>Firmware Analysis Dashboard</h1>
+      <p class="page-subtitle">Upload firmware to run the full detection pipeline.</p>
+    </header>
+
+    <main class="layout">
+      <section class="upload-card" id="upload-card">
+        <h2>Analyze Firmware</h2>
+        <form id="upload-form" novalidate>
+          <div class="dropzone" id="firmware-dropzone" tabindex="0">
+            <input type="file" id="firmware-input" name="firmware" hidden />
+            <div class="dropzone-content" id="firmware-dropzone-content">
+              <span class="dropzone-icon">&#8593;</span>
+              <p class="dropzone-label">Drag &amp; drop firmware here, or click to browse</p>
+              <p class="dropzone-hint">.bin, .img, or any firmware binary</p>
+            </div>
+            <div class="dropzone-file" id="firmware-file-info" hidden>
+              <span class="file-icon">&#128230;</span>
+              <div class="file-meta">
+                <p class="file-name" id="firmware-file-name"></p>
+                <p class="file-size" id="firmware-file-size"></p>
+              </div>
+              <button type="button" class="file-clear" id="firmware-clear" aria-label="Remove file">&times;</button>
+            </div>
+          </div>
+
+          <details class="optional-upload">
+            <summary>Upload golden reference firmware <span class="optional-tag">optional</span></summary>
+            <div class="optional-dropzone" id="golden-dropzone" tabindex="0">
+              <input type="file" id="golden-input" name="golden" hidden />
+              <p class="optional-label" id="golden-label">Drag &amp; drop or click to browse</p>
+            </div>
+          </details>
+
+          <details class="optional-upload">
+            <summary>Upload network capture (.pcap) <span class="optional-tag">optional</span></summary>
+            <div class="optional-dropzone" id="pcap-dropzone" tabindex="0">
+              <input type="file" id="pcap-input" name="pcap" hidden />
+              <p class="optional-label" id="pcap-label">Drag &amp; drop or click to browse</p>
+            </div>
+          </details>
+
+          <button type="submit" id="analyse-button" class="primary-btn" disabled>Analyse Firmware</button>
+          <p class="form-error" id="form-error" hidden></p>
+        </form>
+      </section>
+
+      <section class="history-panel">
+        <div class="history-header">
+          <h2>Recent Scans</h2>
+          <button class="compare-selected-btn" id="compare-selected-btn" type="button" hidden>
+            Compare Selected
+          </button>
+        </div>
+        <div id="history-list" class="history-list">
+          <p class="history-empty" id="history-empty">No scans yet -- run your first analysis above.</p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

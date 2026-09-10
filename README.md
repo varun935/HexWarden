@@ -335,4 +335,4 @@ SIH1387 · Theme: Blockchain & Cybersecurity · Category: Hardware
 | Dhairya Mittal | Hardware, Side-Channel Analysis |
 | Dakshit Chopra | Hardware, Firmware Extraction |
 | Viresh Arora | Report Generation, Testing |
-| Jayanna Sapra | Documentation, Scoring Engine |
+| Jayana Sapra | Documentation, Scoring Engine |

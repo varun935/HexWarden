@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ scan.firmware_filename }} -- HexWarden</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  {% include "_nav.html" %}
+  <div class="page">
+    <header class="topbar report-topbar">
+      <a href="/dashboard" class="back-link">&larr; Back to Dashboard</a>
+      <div class="report-heading">
+        <h1 id="report-filename">{{ scan.firmware_filename }}</h1>
+        <p class="report-meta">Scanned <span id="report-timestamp">{{ scan.created_at }}</span></p>
+      </div>
+    </header>
+
+    <main class="report-layout">
+      <section class="progress-section" id="progress-section">
+        <h2>Analysis in Progress</h2>
+        <div class="progress-bar-track">
+          <div class="progress-bar-fill" id="progress-bar-fill" style="width:0%"></div>
+        </div>
+        <ol class="step-list" id="step-list">
+          <li data-step="Extracting firmware with Binwalk...">Extracting firmware with Binwalk&hellip;</li>
+          <li data-step="Running entropy analysis...">Running entropy analysis&hellip;</li>
+          <li data-step="Running YARA signature matching...">Running YARA signature matching&hellip;</li>
+          <li data-step="Running filesystem anomaly detection...">Running filesystem anomaly detection&hellip;</li>
+          <li data-step="Running string analysis...">Running string analysis&hellip;</li>
+          <li data-step="Running golden-image diff...">Running golden-image diff&hellip;</li>
+          <li data-step="Analysing network capture...">Analysing network capture&hellip;</li>
+          <li data-step="Computing final score...">Computing final score&hellip;</li>
+          <li data-step="Generating report...">Generating report&hellip;</li>
+        </ol>
+        <p class="progress-error" id="progress-error" hidden></p>
+      </section>
+
+      <section class="results-section" id="results-section" hidden>
+        <div class="verdict-card" id="verdict-card">
+          <div class="verdict-badge" id="verdict-badge">--</div>
+          <div class="verdict-details">
+            <p class="verdict-score" id="verdict-score">-- / 100</p>
+            <p class="verdict-confidence" id="verdict-confidence"></p>
+            <p class="verdict-summary" id="verdict-summary"></p>
+          </div>
+        </div>
+
+        <div class="module-breakdown" id="module-breakdown"></div>
+
+        <div class="entropy-plot-card" id="entropy-plot-card" hidden>
+          <h2>Entropy Analysis</h2>
+          <img id="entropy-plot-image" alt="Shannon entropy plot" />
+          <p class="plot-caption">Shannon entropy across firmware binary -- color-coded by confidence.</p>
+        </div>
+
+        <div class="findings-card">
+          <div class="findings-header">
+            <h2>Findings</h2>
+            <div class="findings-filters" id="findings-filters">
+              <button class="filter-btn active" data-filter="all" type="button">All</button>
+              <button class="filter-btn" data-filter="critical" type="button">Critical</button>
+              <button class="filter-btn" data-filter="high" type="button">High</button>
+              <button class="filter-btn" data-filter="medium" type="button">Medium</button>
+              <button class="filter-btn" data-filter="low" type="button">Low</button>
+            </div>
+          </div>
+          <div class="table-scroll">
+            <table class="findings-table" id="findings-table">
+              <thead>
+                <tr>
+                  <th data-sort="severity" class="sortable">Severity</th>
+                  <th data-sort="module_name" class="sortable">Module</th>
+                  <th data-sort="offset" class="sortable">Offset</th>
+                  <th>Description</th>
+                  <th data-sort="confidence" class="sortable">Confidence</th>
+                </tr>
+              </thead>
+              <tbody id="findings-tbody"></tbody>
+            </table>
+          </div>
+          <p class="findings-empty" id="findings-empty" hidden>No findings in this category.</p>
+          <div class="pagination" id="pagination"></div>
+        </div>
+
+        <div class="corroborated-card" id="corroborated-card" hidden>
+          <h2>Corroborated Findings</h2>
+          <p class="corroborated-hint">
+            These findings were flagged by multiple independent modules -- highest confidence.
+          </p>
+          <ul class="corroborated-list" id="corroborated-list"></ul>
+        </div>
+
+        <button class="export-btn" id="export-btn" type="button">Download JSON Report</button>
+      </section>
+    </main>
+  </div>
+
+  <script>window.SCAN_ID = {{ scan_id | tojson }};</script>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

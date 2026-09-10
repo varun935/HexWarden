@@ -1,0 +1,8 @@
+{
+  "shell_commands": ["/bin/sh", "/bin/bash", "wget ", "curl ", "nc ", "netcat", "chmod +x", "mkfifo"],
+  "credential_patterns": ["password=", "passwd=", "api_key=", "secret=", "token=", "Authorization:"],
+  "c2_ports": [4444, 1337, 31337, 8888, 9999, 6666],
+  "suspicious_domains": [".onion", ".bit", "dyndns", "no-ip", "ngrok"],
+  "allowlisted_ips": ["8.8.8.8", "8.8.4.4", "1.1.1.1", "0.0.0.0", "127.0.0.1", "255.255.255.255"],
+  "allowlisted_domains": ["openwrt.org", "dd-wrt.com", "ntp.org", "pool.ntp.org", "debian.org", "ubuntu.com"]
+}
