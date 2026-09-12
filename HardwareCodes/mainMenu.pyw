@@ -123,6 +123,16 @@ class HexWardenApp:
             self.console.config(state=tk.DISABLED)
         self.root.after(0, append)
 
+    def log_overwrite(self, text):
+        """Overwrites the last line in the text widget (for progress bars)."""
+        def overwrite():
+            self.console.config(state=tk.NORMAL)
+            self.console.delete("end-2c linestart", "end-1c")
+            self.console.insert(tk.END, text)
+            self.console.see(tk.END)
+            self.console.config(state=tk.DISABLED)
+        self.root.after(0, overwrite)
+
     def run_extraction(self):
         if self.process and self.process.poll() is None:
             self.log("\n[!] A process is already running...")
@@ -170,13 +180,6 @@ class HexWardenApp:
                 if clean_line:
                     self.log(clean_line)
                 
-                if "Press Enter to exit..." in clean_line:
-                    try:
-                        self.process.stdin.write("\n")
-                        self.process.stdin.flush()
-                    except Exception:
-                        pass
-                        
             self.process.stdout.close()
             self.process.wait()
             self.log(f"\n[System] Process finished (Exit Code {self.process.returncode})")

@@ -95,13 +95,29 @@ def main():
     print("This may take a few minutes. Please do not disconnect the device.")
     
     try:
-        subprocess.run(
-            [sys.executable, "-m", "esptool", "--port", esp32_port, "--baud", "115200", "read-flash", "0x0", str(flash_size_bytes), output_bin],
-            check=True
+        # Run esptool unbuffered and stream it manually to bypass pipe block-buffering
+        process = subprocess.Popen(
+            [sys.executable, "-u", "-m", "esptool", "--port", esp32_port, "--baud", "115200", "read-flash", "0x0", str(flash_size_bytes), output_bin],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            bufsize=0
         )
-        print(f"Success! Firmware saved to {os.path.abspath(output_bin)}")
+        
+        # Read byte by byte and flush immediately to the parent GUI
+        while True:
+            char = process.stdout.read(1)
+            if not char:
+                break
+            sys.stdout.buffer.write(char)
+            sys.stdout.buffer.flush()
+            
+        process.wait()
+        if process.returncode != 0:
+            raise subprocess.CalledProcessError(process.returncode, process.args)
+            
+        print(f"\nSuccess! Firmware saved to {os.path.abspath(output_bin)}")
     except subprocess.CalledProcessError as e:
-        print(f"Error extracting firmware: {e}")
+        print(f"\nError extracting firmware: Process exited with code {e.returncode}")
         
     if not os.environ.get("GUI_MODE"): input("Press Enter to exit...")
 
