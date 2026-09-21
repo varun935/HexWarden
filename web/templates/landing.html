@@ -4,39 +4,65 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>HexWarden &mdash; Firmware Malware Detection</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800;1,9..40,400&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
 </head>
 <body>
   {% include "_nav.html" %}
   <div class="page landing">
     <section class="hero">
-      <h1 class="hero-headline">Firmware Malware Detection for Critical Infrastructure</h1>
-      <p class="hero-sub">
-        Multi-layer static and dynamic analysis pipeline &mdash; catches what antivirus can't see
-      </p>
-      <div class="hero-cta">
-        <a class="primary-btn hero-btn" href="/dashboard">Analyse Firmware</a>
-        <a class="secondary-btn hero-btn" href="https://github.com/varun935/HexWarden"
-           target="_blank" rel="noopener">View on GitHub</a>
+      <div class="hero-copy" data-reveal>
+        <p class="eyebrow">Embedded threat intelligence / 01</p>
+        <h1 class="hero-headline">Firmware Malware Detection for Critical Infrastructure</h1>
+        <p class="hero-sub">
+          Multi-layer static and dynamic analysis pipeline &mdash; catches what antivirus can't see.
+        </p>
+        <div class="hero-cta">
+          <a class="primary-btn hero-btn" href="/dashboard">Analyse Firmware</a>
+          <a class="secondary-btn hero-btn github-btn" href="https://github.com/varun935/HexWarden"
+             target="_blank" rel="noopener">
+            <span>View on GitHub</span><span class="button-arrow" aria-hidden="true">&#8599;</span>
+          </a>
+        </div>
+        <a class="hero-scroll-link" href="#capabilities">Explore capabilities <span aria-hidden="true">&#8595;</span></a>
+      </div>
+      <div class="hero-visual-wrapper" data-reveal>
+        <div class="hero-visual">
+          <img src="https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1200&q=85"
+               alt="Close-up of a printed circuit board" referrerpolicy="no-referrer" />
+          <div class="hero-visual-label"><span class="status-dot"></span> Analysis surface online</div>
+        </div>
       </div>
     </section>
 
-    <section class="feature-cards">
-      <div class="feature-card">
+    <section class="feature-cards" id="capabilities">
+      <div class="feature-card" data-reveal>
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+        </div>
         <h3>Multi-Layer Detection</h3>
         <p>
           Entropy analysis, YARA signatures, filesystem forensics, string analysis,
           golden-image diff, network monitoring &mdash; no single signal issues a verdict.
         </p>
       </div>
-      <div class="feature-card">
+      <div class="feature-card" data-reveal>
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+        </div>
         <h3>Two Operating Modes</h3>
         <p>
           Golden-image comparison when a clean reference exists. Heuristic pipeline when it
           doesn't. Adapts to what you have.
         </p>
       </div>
-      <div class="feature-card">
+      <div class="feature-card" data-reveal>
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path></svg>
+        </div>
         <h3>Built for Power Sector</h3>
         <p>
           Detects the class of dormant hardware trojans (Industroyer, Triton, HAVEX) that sit
@@ -45,7 +71,7 @@
       </div>
     </section>
 
-    <section class="stats-bar">
+    <section class="stats-bar" data-reveal>
       <span>6 Detection Layers</span>
       <span>2 Operating Modes</span>
       <span>Real Firmware Validated</span>
@@ -56,5 +82,31 @@
       SIH1387 &bull; Ministry of Power &bull; Blockchain &amp; Cybersecurity &bull; Team HexWarden
     </footer>
   </div>
+
+
+  <!-- Lenis for smooth scrolling -->
+  <script src="https://unpkg.com/@studio-freight/lenis@1.0.34/dist/lenis.min.js"></script>
+  <script>
+    if (typeof Lenis !== 'undefined') {
+      const lenis = new Lenis({
+        duration: 1.2,
+        easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
+        direction: 'vertical',
+        gestureDirection: 'vertical',
+        smooth: true,
+        mouseMultiplier: 1,
+        smoothTouch: false,
+        touchMultiplier: 2,
+        infinite: false,
+      });
+
+      function raf(time) {
+        lenis.raf(time);
+        requestAnimationFrame(raf);
+      }
+
+      requestAnimationFrame(raf);
+    }
+  </script>
 </body>
 </html>

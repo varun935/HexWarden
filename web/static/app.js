@@ -692,11 +692,40 @@ async function initComparePage() {
   renderCompareDiff(reportA, reportB);
 }
 
+function initMotion() {
+  const revealElements = document.querySelectorAll("[data-reveal]");
+  if (!revealElements.length) return;
+
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches || !("IntersectionObserver" in window)) {
+    revealElements.forEach((element) => element.classList.add("is-visible"));
+    return;
+  }
+
+  document.documentElement.classList.add("motion-ready");
+
+  const observer = new IntersectionObserver(
+    (entries, revealObserver) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        entry.target.classList.add("is-visible");
+        revealObserver.unobserve(entry.target);
+      });
+    },
+    { threshold: 0.14, rootMargin: "0px 0px -30px" }
+  );
+
+  revealElements.forEach((element, index) => {
+    element.style.setProperty("--reveal-delay", `${Math.min(index * 70, 280)}ms`);
+    observer.observe(element);
+  });
+}
+
 /* ------------------------------------------------------------------ */
 /* Boot                                                                  */
 /* ------------------------------------------------------------------ */
 
 document.addEventListener("DOMContentLoaded", () => {
+  initMotion();
   initIndexPage();
   initCompareSelection();
   initReportPage();
