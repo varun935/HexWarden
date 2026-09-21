@@ -3,13 +3,14 @@ import sys
 import subprocess
 import threading
 import io
+import shutil
 import matplotlib.pyplot as plt
 
-# Look for sigrok-cli in the standard Windows installation path
-SIGROK_CLI = r"C:\Program Files\sigrok\PulseView\sigrok-cli.exe"
+# Look for sigrok-cli in the system PATH
+SIGROK_CLI = shutil.which("sigrok-cli") or "sigrok-cli"
 
 def check_sigrok():
-    if not os.path.exists(SIGROK_CLI):
+    if not shutil.which("sigrok-cli"):
         print("="*70)
         print(" ERROR: Hardware driver software (PulseView/sigrok) not found!")
         print("="*70)

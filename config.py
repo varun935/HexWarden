@@ -94,7 +94,7 @@ CLI_SUMMARY_TOP_N: int = 10  # highest-score findings printed to the terminal by
 # Change this if binwalk is installed elsewhere (e.g. /usr/local/bin/binwalk).
 # To use the Python API backend instead, install binwalk as a package:
 #   git clone https://github.com/ReFirmLabs/binwalk && cd binwalk && pip install .
-BINWALK_BINARY: str = "/usr/bin/binwalk"
+BINWALK_BINARY: str = "binwalk"
 BINWALK_SUBPROCESS_TIMEOUT_SECONDS: int = 300  # safety cap for large firmware extraction
 
 # Binwalk's plain-text scan table never reports a region's size, so an end
