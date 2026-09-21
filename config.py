@@ -410,7 +410,7 @@ WEB_MAX_FIRMWARE_SIZE_MB: int = 500
 WEB_DATABASE_PATH: Path = PROJECT_ROOT / "web" / "hexwarden.db"
 WEB_SECRET_KEY: str = "hexwarden-sih2026"
 WEB_HOST: str = "0.0.0.0"
-WEB_PORT: int = 5000
+WEB_PORT: int = 3000
 
 # --------------------------------------------------------------------------
 # Logging
