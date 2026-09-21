@@ -68,7 +68,10 @@ const TRASH_SVG =
 function setupDropzone(dropzoneEl, inputEl, onChange) {
   if (!dropzoneEl || !inputEl) return;
 
-  const openPicker = () => inputEl.click();
+  const openPicker = (event) => {
+    if (event && event.target && event.target.closest(".file-clear")) return;
+    inputEl.click();
+  };
   dropzoneEl.addEventListener("click", openPicker);
   dropzoneEl.addEventListener("keydown", (event) => {
     if (event.key === "Enter" || event.key === " ") {
@@ -134,12 +137,20 @@ function initIndexPage() {
 
   setupDropzone(firmwareDropzone, firmwareInput, selectFirmware);
 
-  firmwareClear.addEventListener("click", (event) => {
-    event.stopPropagation();
+  function clearFirmware() {
+    // Reliably reset the file input across all browsers
     firmwareInput.value = "";
+    // For browsers that ignore .value = "" on file inputs (some Safari versions)
+    try { firmwareInput.type = ""; firmwareInput.type = "file"; } catch (_) {}
     firmwareDropzoneContent.hidden = false;
     firmwareFileInfo.hidden = true;
     analyseButton.disabled = true;
+  }
+
+  firmwareClear.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    clearFirmware();
   });
 
   [

@@ -3,7 +3,7 @@
 Usage:
     python3 web/run.py
 
-Starts the Flask dashboard at http://localhost:5000 (or
+Starts the Flask dashboard at http://localhost:3000 (or
 config.WEB_HOST/config.WEB_PORT, if changed).
 """
 
@@ -21,6 +21,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config
 from web.app import app
 
-if __name__ == "__main__":
+
+def main() -> None:
+    """Start the HexWarden web dashboard."""
     logging.basicConfig(level=logging.INFO, format=config.LOG_FORMAT)
     app.run(host=config.WEB_HOST, port=config.WEB_PORT, debug=False, threaded=True)
+
+
+if __name__ == "__main__":
+    main()

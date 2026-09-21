@@ -438,6 +438,11 @@ section:hover,
   text-align: left;
 }
 
+/* Ensure the HTML [hidden] attribute is respected even when display is set */
+.dropzone-file[hidden] {
+  display: none;
+}
+
 .file-icon { font-size: 26px; }
 
 .file-meta { flex: 1; min-width: 0; }
@@ -568,7 +573,7 @@ section:hover,
   font-family: var(--font-sans);
   letter-spacing: 0.01em;
   cursor: pointer;
-  margin-top: 8px;
+  margin-top: 24px;
   box-shadow: 0 4px 16px rgba(78, 210, 176, 0.18);
   transition: all 0.2s var(--ease-out);
 }

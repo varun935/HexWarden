@@ -33,11 +33,14 @@ setup(
         "yara-python==4.5.1",
         "pyelftools==0.31",
         "scapy==2.5.0",
+        "flask>=3.0.0",
+        "flask-cors",
     ],
     python_requires=">=3.9",
     entry_points={
         "console_scripts": [
             "hexwarden=main:main",
+            "hexwarden-web=web.run:main",
         ],
     },
 )

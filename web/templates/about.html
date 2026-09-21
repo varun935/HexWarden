@@ -109,15 +109,9 @@
   <script>
     if (typeof Lenis !== 'undefined') {
       const lenis = new Lenis({
-        duration: 1.2,
-        easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
-        direction: 'vertical',
-        gestureDirection: 'vertical',
-        smooth: true,
-        mouseMultiplier: 1,
-        smoothTouch: false,
-        touchMultiplier: 2,
-        infinite: false,
+        lerp: 0.08,           // exponential-decay lerp — Apple-style inertia
+        smoothWheel: true,
+        smoothTouch: false,   // keep native momentum on trackpad/touch
       });
 
       function raf(time) {
