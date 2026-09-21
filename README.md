@@ -333,6 +333,6 @@ SIH1387 · Theme: Blockchain & Cybersecurity · Category: Hardware
 | Varun Chaitenya Sharma | Team Lead, Core Architecture, Reverse Engineering |
 | Tejas Wasan | YARA Engine, String Analysis |
 | Dhairya Mittal | Hardware, Side-Channel Analysis |
-| Dakshit Chopra | Hardware, Firmware Extraction |
+| Aaryan Joshi | Hardware, Firmware Extraction |
 | Viresh Arora | Report Generation, Testing |
 | Jayana Sapra | Documentation, Scoring Engine |
