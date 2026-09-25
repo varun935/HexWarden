@@ -1,0 +1,61 @@
+services:
+  network-init:
+    image: hyperledger/besu:24.5.1
+    volumes:
+      - ./config:/network
+      - ./generated:/network/generated
+    command: >-
+      sh -c 'if [ ! -f /network/generated/genesis.json ]; then
+      rm -rf /network/generated/* &&
+      besu operator generate-blockchain-config
+      --config-file=/network/network-config.toml
+      --to=/network/generated
+      --private-key-file-name=key; fi'
+
+  node1:
+    image: hyperledger/besu:24.5.1
+    depends_on:
+      network-init:
+        condition: service_completed_successfully
+    environment: [NODE_INDEX=1]
+    volumes: ["./generated:/network", "./node1:/opt/besu/data"]
+    command: >-
+      sh -c 'key=$$(find /network -type f -name key | sort | sed -n "$${NODE_INDEX}p") &&
+      cp "$$key" /opt/besu/data/key &&
+      besu --data-path=/opt/besu/data --genesis-file=/network/genesis.json
+      --rpc-http-enabled --rpc-http-api=ETH,NET,WEB3,ADMIN,TXPOOL
+      --rpc-http-host=0.0.0.0 --host-allowlist="*" --p2p-host=0.0.0.0'
+    ports: ["8545:8545", "30303:30303"]
+
+  node2:
+    image: hyperledger/besu:24.5.1
+    depends_on: {network-init: {condition: service_completed_successfully}}
+    environment: [NODE_INDEX=2]
+    volumes: ["./generated:/network", "./node2:/opt/besu/data"]
+    command: >-
+      sh -c 'key=$$(find /network -type f -name key | sort | sed -n "$${NODE_INDEX}p") && cp "$$key" /opt/besu/data/key &&
+      besu --data-path=/opt/besu/data --genesis-file=/network/genesis.json --rpc-http-enabled
+      --rpc-http-api=ETH,NET,WEB3,ADMIN,TXPOOL --rpc-http-host=0.0.0.0 --host-allowlist="*" --p2p-host=0.0.0.0'
+    ports: ["8546:8545", "30304:30303"]
+
+  node3:
+    image: hyperledger/besu:24.5.1
+    depends_on: {network-init: {condition: service_completed_successfully}}
+    environment: [NODE_INDEX=3]
+    volumes: ["./generated:/network", "./node3:/opt/besu/data"]
+    command: >-
+      sh -c 'key=$$(find /network -type f -name key | sort | sed -n "$${NODE_INDEX}p") && cp "$$key" /opt/besu/data/key &&
+      besu --data-path=/opt/besu/data --genesis-file=/network/genesis.json --rpc-http-enabled
+      --rpc-http-api=ETH,NET,WEB3,ADMIN,TXPOOL --rpc-http-host=0.0.0.0 --host-allowlist="*" --p2p-host=0.0.0.0'
+    ports: ["8547:8545", "30305:30303"]
+
+  node4:
+    image: hyperledger/besu:24.5.1
+    depends_on: {network-init: {condition: service_completed_successfully}}
+    environment: [NODE_INDEX=4]
+    volumes: ["./generated:/network", "./node4:/opt/besu/data"]
+    command: >-
+      sh -c 'key=$$(find /network -type f -name key | sort | sed -n "$${NODE_INDEX}p") && cp "$$key" /opt/besu/data/key &&
+      besu --data-path=/opt/besu/data --genesis-file=/network/genesis.json --rpc-http-enabled
+      --rpc-http-api=ETH,NET,WEB3,ADMIN,TXPOOL --rpc-http-host=0.0.0.0 --host-allowlist="*" --p2p-host=0.0.0.0'
+    ports: ["8548:8545", "30306:30303"]

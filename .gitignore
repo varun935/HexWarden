@@ -9,6 +9,10 @@ dist/
 build/
 .eggs/
 *.egg
+node_modules/
+contracts/artifacts/
+contracts/cache/
+contracts/typechain-types/
 
 # Virtual environments
 .venv/
@@ -29,6 +33,15 @@ ses.txt
 # ...except the pattern library itself, which is source configuration
 # (modules/strings.py loads it at runtime), not a generated report.
 !config/string_patterns.json
+!backend/package.json
+!backend/package-lock.json
+!blockchain/config/genesis.json
+!dashboard/package.json
+!dashboard/package-lock.json
+!contracts/package.json
+!contracts/package-lock.json
+!contracts/tsconfig.json
+!firmware/*.bin
 
 # Web dashboard runtime state -- uploaded firmware (arbitrary extensions,
 # not just .bin/.img) and the local scans database, neither of which
