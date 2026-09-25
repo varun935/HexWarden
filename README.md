@@ -65,7 +65,7 @@ Set the backend environment from the repository root before starting it:
 
 ```bash
 export BESU_RPC_URL=http://127.0.0.1:8545
-export DEPLOYER_PRIVATE_KEY=ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bfddc77
+export DEPLOYER_PRIVATE_KEY=30389ef71a9f24675e4eb0f7c761a1b8c56fb21883a98a3cd8582585e4b7b1d8
 export DEPLOYMENT_FILE="$PWD/contracts/deployment.json"
 export HEXWARDEN_ROOT="$PWD"
 cd backend && npm start

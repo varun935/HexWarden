@@ -1,4 +1,4 @@
 #!/usr/bin/env sh
 set -eu
 cd "$(dirname "$0")/.."
-docker compose -f blockchain/docker-compose.yml down
+docker-compose -f blockchain/docker-compose.yml down

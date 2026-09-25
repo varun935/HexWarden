@@ -13,6 +13,12 @@ node_modules/
 contracts/artifacts/
 contracts/cache/
 contracts/typechain-types/
+contracts/deployment.json
+blockchain/generated/
+blockchain/node1/
+blockchain/node2/
+blockchain/node3/
+blockchain/node4/
 
 # Virtual environments
 .venv/
@@ -36,6 +42,7 @@ ses.txt
 !backend/package.json
 !backend/package-lock.json
 !blockchain/config/genesis.json
+!blockchain/config/network-config.json
 !dashboard/package.json
 !dashboard/package-lock.json
 !contracts/package.json
@@ -59,3 +66,4 @@ golden/openwrt-25.12.5-bcm27xx-bcm2712-rpi-5-ext4-factory.img.extracted/0/Linux_
 *.swp
 *~
 golden/
+.env

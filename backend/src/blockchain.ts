@@ -1,6 +1,9 @@
 import { Contract, JsonRpcProvider, Wallet } from "ethers";
+import dotenv from "dotenv";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+
+dotenv.config({ path: resolve(__dirname, "../../.env") });
 
 const ABI = [
   "function approveFirmware(bytes32,string,string)",
@@ -13,7 +16,7 @@ const ABI = [
 
 const rpcUrl = process.env.BESU_RPC_URL ?? "http://127.0.0.1:8545";
 const privateKey = process.env.DEPLOYER_PRIVATE_KEY;
-const deploymentPath = process.env.DEPLOYMENT_FILE ?? resolve(process.cwd(), "../contracts/deployment.json");
+const deploymentPath = process.env.DEPLOYMENT_FILE ?? resolve(__dirname, "../../contracts/deployment.json");
 
 export function blockchain() {
   if (!privateKey) throw new Error("DEPLOYER_PRIVATE_KEY is required");

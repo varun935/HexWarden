@@ -1,6 +1,0 @@
-genesis = "/network/genesis.json"
-
-[blockchain]
-  [blockchain.nodes]
-    generate = true
-    count = 4

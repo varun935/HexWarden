@@ -9,7 +9,7 @@ async function main() {
   await registry.waitForDeployment();
   const address = await registry.getAddress();
   const deployment = { address, chainId: 1337, deployer: deployer.address };
-  writeFileSync(resolve(__dirname, "../../deployment.json"), JSON.stringify(deployment, null, 2));
+  writeFileSync(resolve(__dirname, "../deployment.json"), JSON.stringify(deployment, null, 2));
   console.log(JSON.stringify(deployment));
 }
 
