@@ -33,8 +33,8 @@
   </div>
 
   <script>
-    window.COMPARE_A = {{ scan_a_id | tojson }};
-    window.COMPARE_B = {{ scan_b_id | tojson }};
+    window.COMPARE_A = document.body.dataset.scan_a_id;
+    window.COMPARE_B = document.body.dataset.scan_b_id;
   </script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 

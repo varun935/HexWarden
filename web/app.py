@@ -43,6 +43,8 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 import uuid
 from dataclasses import asdict
 from pathlib import Path
@@ -359,6 +361,37 @@ def landing():
 def dashboard():
     """Render the scan dashboard: upload form + scan history."""
     return render_template("index.html", active_page="dashboard")
+
+
+def _proxy_ledger_read(path: str):
+    """Proxy a read-only ledger API request to the loopback DLT backend."""
+    api_url = os.environ.get("DLT_API_URL", "http://127.0.0.1:4000").rstrip("/")
+    query = request.query_string.decode("ascii")
+    url = f"{api_url}{path}" + (f"?{query}" if query else "")
+    api_request = urllib.request.Request(url, headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(api_request, timeout=8) as response:
+            return Response(response.read(), status=response.status, content_type="application/json")
+    except urllib.error.HTTPError as error:
+        return Response(error.read(), status=error.code, content_type="application/json")
+    except (urllib.error.URLError, TimeoutError, OSError) as error:
+        logger.warning("Ledger API proxy request failed: %s", error)
+        return jsonify({"error": "Ledger API is unavailable. Start the DLT backend."}), 503
+
+
+@app.route("/api/blockchain/status")
+def ledger_status_proxy():
+    return _proxy_ledger_read("/api/blockchain/status")
+
+
+@app.route("/api/audit")
+def ledger_audit_proxy():
+    return _proxy_ledger_read("/api/audit")
+
+
+@app.route("/api/firmware/<hash_value>")
+def firmware_ledger_proxy(hash_value: str):
+    return _proxy_ledger_read(f"/api/firmware/{hash_value}")
 
 
 

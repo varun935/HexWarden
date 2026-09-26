@@ -1,7 +1,6 @@
 <nav class="site-nav">
   <a class="site-nav-brand" href="/">
-    <span class="brand-mark">&#9838;</span>
-    <span>HexWarden</span>
+    <img src="{{ url_for('static', filename='hexwarden.png') }}" alt="HexWarden" />
   </a>
   <div class="site-nav-links">
     <a href="/"{% if active_page == 'home' %} class="active"{% endif %}>Home</a>

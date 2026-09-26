@@ -2,7 +2,7 @@ import { FormEvent, StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
 
-const API = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:4000";
+const API = import.meta.env.VITE_API_URL ?? "";
 type Status = { blockNumber: number; chainId: number; contractAddress: string; connectedNodes: { url: string; online: boolean }[] };
 type FirmwareRecord = { hash: string; deviceModel: string; version: string; attester: string; timestamp: number; approved: boolean };
 type ApiError = { error: string };

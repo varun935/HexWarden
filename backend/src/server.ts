@@ -100,7 +100,8 @@ app.get("/api/audit", (req, res) => {
 });
 
 const port = Number(process.env.PORT ?? 4000);
-app.listen(port, () => {
+const host = process.env.HOST ?? "127.0.0.1";
+app.listen(port, host, () => {
   recordAudit("success", "HexWarden blockchain API started");
-  console.log(`HexWarden DLT backend listening on http://localhost:${port}`);
+  console.log(`HexWarden DLT backend listening on http://${host}:${port}`);
 });
