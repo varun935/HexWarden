@@ -54,6 +54,11 @@
           <div class="device-check-copy">
             <h2>Device update check</h2>
             <p>Send this analyzed firmware hash through the ESP32 and check its ledger decision.</p>
+            <div class="device-hash-row">
+              <code id="device-firmware-hash"></code>
+              <button class="copy-hash-btn" id="copy-firmware-hash" type="button" aria-label="Copy firmware hash">Copy hash</button>
+              <span id="copy-hash-status" role="status" aria-live="polite"></span>
+            </div>
           </div>
           <button class="primary-btn" id="device-check-btn" type="button">Run device check</button>
           <p class="device-check-result" id="device-check-result" role="status" hidden></p>

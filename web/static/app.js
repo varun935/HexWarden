@@ -393,15 +393,38 @@ function setupDeviceCheck(scanId, firmwareHash) {
   const card = document.getElementById("device-check-card");
   const button = document.getElementById("device-check-btn");
   const result = document.getElementById("device-check-result");
-  if (!card || !button || !result || !firmwareHash) return;
+  const hashValue = document.getElementById("device-firmware-hash");
+  const copyButton = document.getElementById("copy-firmware-hash");
+  const copyStatus = document.getElementById("copy-hash-status");
+  if (!card || !button || !result || !hashValue || !copyButton || !copyStatus || !firmwareHash) return;
 
   card.hidden = false;
+  hashValue.textContent = firmwareHash;
+  copyButton.onclick = async () => {
+    copyStatus.textContent = "Copying...";
+    try {
+      await navigator.clipboard.writeText(firmwareHash);
+      copyStatus.textContent = "Copied";
+    } catch (_error) {
+      const textArea = document.createElement("textarea");
+      textArea.value = firmwareHash;
+      textArea.setAttribute("readonly", "");
+      textArea.style.position = "fixed";
+      textArea.style.opacity = "0";
+      document.body.appendChild(textArea);
+      textArea.select();
+      const copied = document.execCommand("copy");
+      textArea.remove();
+      copyStatus.textContent = copied ? "Copied" : "Copy failed";
+    }
+  };
+
   button.onclick = async () => {
     button.disabled = true;
     button.textContent = "Checking ledger...";
     result.hidden = false;
     result.className = "device-check-result is-pending";
-    result.textContent = "Routing firmware hash through the ESP32 simulator...";
+    result.textContent = "Routing firmware hash through the ESP32...";
     try {
       const response = await fetch(`/scan/${encodeURIComponent(scanId)}/device-check`, { method: "POST" });
       const outcome = await response.json();

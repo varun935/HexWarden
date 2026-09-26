@@ -52,7 +52,11 @@ html {
   scroll-behavior: smooth;
   scroll-padding-top: 84px;
   min-width: 320px;
+  scrollbar-width: none;
 }
+
+html::-webkit-scrollbar:vertical,
+body::-webkit-scrollbar:vertical { width: 0; }
 
 body {
   background: var(--bg-primary);
@@ -669,6 +673,11 @@ section:hover,
 
 .device-check-copy h2 { margin: 0 0 5px; font-size: 18px; }
 .device-check-copy p { margin: 0; color: var(--text-secondary); font-size: 13px; }
+.device-hash-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.device-hash-row code { max-width: 100%; color: var(--text-primary); font: 11px/1.5 var(--font-mono); overflow-wrap: anywhere; user-select: all; }
+.copy-hash-btn { padding: 5px 9px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg-tertiary); color: var(--text-primary); font: 600 11px var(--font-sans); cursor: pointer; }
+.copy-hash-btn:hover { border-color: var(--accent); color: var(--accent); }
+#copy-hash-status { min-width: 45px; color: var(--green); font-size: 11px; }
 .device-check-result { flex-basis: 100%; margin: 0; font: 600 13px var(--font-mono); }
 .device-check-result.is-pending { color: var(--text-secondary); }
 .device-check-result.is-accepted { color: var(--green); }
