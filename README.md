@@ -455,25 +455,6 @@ See `tests/test_firmware_pipeline.py`'s `_MAX_ENTROPY_BLOB` for the exact
 byte-permutation-blob pattern used by the automated test suite, which correctly
 avoids the `os.urandom()` small-window bias described above.
 
-## Project Layout
-main.py CLI entry point (runs modules, prints findings)
-config.py all tunable thresholds / weights
-config/string_patterns.json editable string-pattern library
-core/
-scoring.py weighted verdict aggregation (used by the dashboard)
-modules/
-entropy.py Shannon entropy + local contrast
-firmware_pipeline.py Binwalk extract + raw/extracted entropy + raw YARA/strings + filesystem
-binwalk_wrapper.py Binwalk backend abstraction (subprocess / Python API)
-golden_diff.py content-defined-chunking diff (Mode A)
-yara_engine.py YARA wrapper + clean-baseline suppression
-filesystem.py extracted-filesystem forensics
-strings.py string extraction + pattern matching
-dynamic/network_monitor.py pcap C2 / beacon / DNS-tunnel analysis
-rules/ YARA rule sets (ICS protocols, backdoors, packers, crypto, persistence, …)
-web/ Flask dashboard — app.py, database.py, run.py, templates/, static/
-tests/ pytest suite (44 tests)
-docs/ architecture.md, usage.md, rule_writing.md
 
 
 ## Team
