@@ -50,6 +50,15 @@
           </div>
         </div>
 
+        <section class="device-check-card" id="device-check-card" hidden>
+          <div class="device-check-copy">
+            <h2>Device update check</h2>
+            <p>Send this analyzed firmware hash through the ESP32 and check its ledger decision.</p>
+          </div>
+          <button class="primary-btn" id="device-check-btn" type="button">Run device check</button>
+          <p class="device-check-result" id="device-check-result" role="status" hidden></p>
+        </section>
+
         <div class="module-breakdown" id="module-breakdown"></div>
 
         <div class="entropy-plot-card" id="entropy-plot-card" hidden>
@@ -103,23 +112,5 @@
   <script>window.SCAN_ID = {{ scan_id | tojson }};</script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 
-  <!-- Lenis for smooth scrolling -->
-  <script src="https://unpkg.com/@studio-freight/lenis@1.0.34/dist/lenis.min.js"></script>
-  <script>
-    if (typeof Lenis !== 'undefined') {
-      const lenis = new Lenis({
-        lerp: 0.08,           // exponential-decay lerp — Apple-style inertia
-        smoothWheel: true,
-        smoothTouch: false,   // keep native momentum on trackpad/touch
-      });
-
-      function raf(time) {
-        lenis.raf(time);
-        requestAnimationFrame(raf);
-      }
-
-      requestAnimationFrame(raf);
-    }
-  </script>
 </body>
 </html>

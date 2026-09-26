@@ -314,6 +314,13 @@ section:hover,
 
 .layout > section { min-height: 100%; }
 
+.ledger-mount {
+  margin-top: 42px;
+  padding-top: 28px;
+  border-top: 1px solid var(--border);
+  scroll-margin-top: 88px;
+}
+
 .report-layout {
   display: flex;
   flex-direction: column;
@@ -650,6 +657,22 @@ section:hover,
   font-size: 13px;
   margin: 12px 0 0;
 }
+
+.device-check-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+  border-left: 3px solid var(--accent);
+}
+
+.device-check-copy h2 { margin: 0 0 5px; font-size: 18px; }
+.device-check-copy p { margin: 0; color: var(--text-secondary); font-size: 13px; }
+.device-check-result { flex-basis: 100%; margin: 0; font: 600 13px var(--font-mono); }
+.device-check-result.is-pending { color: var(--text-secondary); }
+.device-check-result.is-accepted { color: var(--green); }
+.device-check-result.is-rejected, .device-check-result.is-error { color: var(--critical); }
 
 /* ------------------------------------------------------------------ */
 /* History panel                                                       */
@@ -1111,6 +1134,7 @@ section:hover,
 
 .findings-filters {
   display: flex;
+  flex-wrap: wrap;
   gap: 5px;
 }
 

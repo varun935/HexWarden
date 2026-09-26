@@ -38,23 +38,5 @@
   </script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 
-  <!-- Lenis for smooth scrolling -->
-  <script src="https://unpkg.com/@studio-freight/lenis@1.0.34/dist/lenis.min.js"></script>
-  <script>
-    if (typeof Lenis !== 'undefined') {
-      const lenis = new Lenis({
-        lerp: 0.08,           // exponential-decay lerp — Apple-style inertia
-        smoothWheel: true,
-        smoothTouch: false,   // keep native momentum on trackpad/touch
-      });
-
-      function raf(time) {
-        lenis.raf(time);
-        requestAnimationFrame(raf);
-      }
-
-      requestAnimationFrame(raf);
-    }
-  </script>
 </body>
 </html>
