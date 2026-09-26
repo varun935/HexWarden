@@ -6,7 +6,8 @@ const API = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:4000";
 type Status = { blockNumber: number; chainId: number; contractAddress: string; connectedNodes: { url: string; online: boolean }[] };
 type FirmwareRecord = { hash: string; deviceModel: string; version: string; attester: string; timestamp: number; approved: boolean };
 type ApiError = { error: string };
-type AuditEntry = { id: number; at: string; kind: "request" | "success" | "warning" | "error"; message: string };
+type AuditEntry = { id: string; at: string; kind: "request" | "success" | "warning" | "error"; message: string };
+type AuditResponse = { entries: AuditEntry[] };
 
 const validatorNames = ["Vendor", "Security Laboratory", "Utility", "CSIRT"];
 
@@ -17,20 +18,23 @@ function App() {
   const [record, setRecord] = useState<FirmwareRecord | ApiError>();
   const [querying, setQuerying] = useState(false);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
+  const [auditError, setAuditError] = useState<string>();
 
-  function addAudit(kind: AuditEntry["kind"], message: string) {
-    setAudit((entries) => [{ id: Date.now(), at: new Date().toISOString(), kind, message }, ...entries].slice(0, 60));
+  async function refreshAudit() {
+    try {
+      const response = await fetch(`${API}/api/audit?limit=40`);
+      if (!response.ok) throw new Error(`Audit service returned HTTP ${response.status}`);
+      const body = await response.json() as AuditResponse;
+      setAudit(body.entries);
+      setAuditError(undefined);
+    } catch (error) {
+      setAuditError(error instanceof Error ? error.message : "Audit history unavailable");
+    }
   }
 
   useEffect(() => {
     let active = true;
-    let nextId = 0;
-    const log = (kind: AuditEntry["kind"], message: string) => {
-      if (!active) return;
-      setAudit((entries) => [{ id: nextId++, at: new Date().toISOString(), kind, message }, ...entries].slice(0, 60));
-    };
     const refreshStatus = async () => {
-      log("request", "Fetching blockchain status from Besu RPC endpoints");
       try {
         const response = await fetch(`${API}/api/blockchain/status`);
         const body = await response.json() as Status | ApiError;
@@ -38,23 +42,22 @@ function App() {
         if (!active) return;
         setStatus(body);
         setStatusError(undefined);
-        const online = body.connectedNodes.filter((node) => node.online).length;
-        log(online === body.connectedNodes.length ? "success" : "warning", `Block ${body.blockNumber} received; ${online}/${body.connectedNodes.length} validators responding`);
-        body.connectedNodes.forEach((node, index) => {
-          if (!node.online) log("warning", `${validatorNames[index] ?? "Validator"} RPC is unreachable at ${node.url}`);
-        });
+        void refreshAudit();
       } catch (error) {
         if (!active) return;
         const message = error instanceof Error ? error.message : "Blockchain status unavailable";
         setStatusError(message);
-        log("error", `Blockchain status request failed: ${message}`);
+        void refreshAudit();
       }
     };
     void refreshStatus();
+    void refreshAudit();
     const timer = window.setInterval(() => void refreshStatus(), 12000);
+    const auditTimer = window.setInterval(() => void refreshAudit(), 10000);
     return () => {
       active = false;
       window.clearInterval(timer);
+      window.clearInterval(auditTimer);
     };
   }, []);
 
@@ -64,25 +67,21 @@ function App() {
     const normalizedHash = hash.trim().replace(/^0x/i, "");
     setQuerying(true);
     setRecord(undefined);
-    addAudit("request", `Fetching firmware record ${normalizedHash.slice(0, 12)}… from blockchain`);
     try {
       const response = await fetch(`${API}/api/firmware/${normalizedHash}`);
       const body = await response.json() as FirmwareRecord | ApiError;
       if (!response.ok) {
         const message = "error" in body ? body.error : `Ledger query returned HTTP ${response.status}`;
         setRecord({ error: message });
-        addAudit(response.status === 404 ? "warning" : "error", `Firmware lookup: ${message}`);
         return;
       }
       setRecord(body as FirmwareRecord);
-      const result = body as FirmwareRecord;
-      addAudit(result.approved ? "success" : "warning", `Ledger record found: ${result.approved ? "approved" : "revoked"}, ${result.deviceModel} ${result.version}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Firmware lookup failed";
       setRecord({ error: message });
-      addAudit("error", `Firmware lookup failed: ${message}`);
     } finally {
       setQuerying(false);
+      void refreshAudit();
     }
   }
   const nodes = status?.connectedNodes ?? [];
@@ -110,8 +109,8 @@ function App() {
         {record && <pre className="ledger-record">{JSON.stringify(record, null, 2)}</pre>}
       </section>
       <section className="ledger-panel ledger-audit" aria-labelledby="ledger-audit-title">
-        <div className="ledger-panel-heading"><h3 id="ledger-audit-title">Activity audit</h3><span>SESSION LOG</span></div>
-        <ol className="ledger-audit-list" aria-live="polite">{audit.length ? audit.map((entry) => <li className={`ledger-audit-entry ${entry.kind}`} key={entry.id}><time dateTime={entry.at}>{new Date(entry.at).toLocaleTimeString()}</time><span>{entry.message}</span></li>) : <li className="ledger-audit-empty">Waiting for first network request</li>}</ol>
+        <div className="ledger-panel-heading"><h3 id="ledger-audit-title">Activity audit</h3><span>SERVER LOG</span></div>
+        <ol className="ledger-audit-list" aria-live="polite">{audit.length ? audit.map((entry) => <li className={`ledger-audit-entry ${entry.kind}`} key={entry.id}><time dateTime={entry.at}>{new Date(entry.at).toLocaleTimeString()}</time><span>{entry.message}</span></li>) : <li className="ledger-audit-empty">{auditError ?? "Waiting for server activity"}</li>}</ol>
       </section>
     </div>
   </div>;
