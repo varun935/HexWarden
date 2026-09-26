@@ -34,6 +34,7 @@ app.get("/api/firmware/:hash", async (req, res) => {
     const model = String(req.query.deviceModel ?? "");
     const { contract } = blockchain();
     const record = await contract.getFirmware(`0x${req.params.hash.replace(/^0x/, "")}`);
+    if (record.timestamp === 0n) return res.status(404).json({ error: "Firmware is not registered" });
     return res.json({ hash: record[0], deviceModel: record[1], version: record[2], attester: record[3], timestamp: Number(record[4]), approved: record[5] && (!model || await contract.isApproved(record[0], model)) });
   } catch (error) { return res.status(404).json({ error: String(error) }); }
 });

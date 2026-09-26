@@ -9,7 +9,7 @@ const ABI = [
   "function approveFirmware(bytes32,string,string)",
   "function revokeFirmware(bytes32)",
   "function isApproved(bytes32,string) view returns (bool)",
-  "function getFirmware(bytes32) view returns (bytes32,string,string,address,uint256,bool)",
+  "function getFirmware(bytes32) view returns ((bytes32 firmwareHash,string deviceModel,string version,address attester,uint256 timestamp,bool approved))",
   "event FirmwareApproved(bytes32 indexed firmwareHash,string deviceModel,string version,address indexed attester,uint256 timestamp)",
   "event FirmwareRevoked(bytes32 indexed firmwareHash,address indexed revoker,uint256 timestamp)"
 ];
