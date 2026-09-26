@@ -17,7 +17,7 @@ flowchart LR
   S --> C[Solidity FirmwareRegistry]
   C --> Q[QBFT validators]
   Q --> L[Shared Besu ledger]
-  L --> E[ESP32 simulator query]
+  L --> E[ESP32 Query]
   E --> A[Accept or reject update]
 ```
 

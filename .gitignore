@@ -23,7 +23,7 @@ blockchain/node4/
 # Virtual environments
 .venv/
 venv/
-env/
+env
 
 # Project specific
 tmp/
