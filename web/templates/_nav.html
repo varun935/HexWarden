@@ -1,11 +1,11 @@
 <nav class="site-nav">
   <a class="site-nav-brand" href="/">
-    <span class="brand-mark">&#9838;</span>
-    <span>HexWarden</span>
+    <img src="{{ url_for('static', filename='hexwarden.png') }}" alt="HexWarden" />
   </a>
   <div class="site-nav-links">
     <a href="/"{% if active_page == 'home' %} class="active"{% endif %}>Home</a>
     <a href="/dashboard"{% if active_page == 'dashboard' %} class="active"{% endif %}>Dashboard</a>
+    <a href="/dashboard#ledger-fabric">Ledger</a>
     <a href="/about"{% if active_page == 'about' %} class="active"{% endif %}>About</a>
     <a href="https://github.com/varun935/HexWarden" target="_blank" rel="noopener">GitHub &#8599;</a>
   </div>

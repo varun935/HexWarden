@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS scans (
     created_at TEXT NOT NULL,
     firmware_filename TEXT NOT NULL,
     firmware_size INTEGER NOT NULL,
+    firmware_sha256 TEXT,
     has_golden INTEGER NOT NULL DEFAULT 0,
     has_pcap INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'pending',
@@ -77,6 +78,9 @@ def init_db() -> None:
     """
     with _connect() as connection:
         connection.execute(_SCHEMA)
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(scans)")}
+        if "firmware_sha256" not in columns:
+            connection.execute("ALTER TABLE scans ADD COLUMN firmware_sha256 TEXT")
 
 
 def _now() -> str:
@@ -88,6 +92,7 @@ def create_scan(
     scan_id: str,
     firmware_filename: str,
     firmware_size: int,
+    firmware_sha256: str,
     has_golden: bool,
     has_pcap: bool,
 ) -> None:
@@ -97,6 +102,7 @@ def create_scan(
         scan_id: UUID identifying this scan.
         firmware_filename: Original uploaded firmware filename.
         firmware_size: Firmware file size in bytes.
+        firmware_sha256: SHA-256 digest retained for the device check.
         has_golden: Whether a golden reference firmware was uploaded.
         has_pcap: Whether a network capture was uploaded.
 
@@ -110,11 +116,11 @@ def create_scan(
         connection.execute(
             """
             INSERT INTO scans (
-                id, created_at, firmware_filename, firmware_size,
+                id, created_at, firmware_filename, firmware_size, firmware_sha256,
                 has_golden, has_pcap, status
-            ) VALUES (?, ?, ?, ?, ?, ?, 'pending')
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
             """,
-            (scan_id, _now(), firmware_filename, firmware_size, int(has_golden), int(has_pcap)),
+            (scan_id, _now(), firmware_filename, firmware_size, firmware_sha256, int(has_golden), int(has_pcap)),
         )
 
 

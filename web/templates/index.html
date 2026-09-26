@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800;1,9..40,400&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='ledger-dashboard/assets/ledger-dashboard.css') }}" />
 </head>
 <body>
   {% include "_nav.html" %}
@@ -71,27 +72,14 @@
         </div>
       </section>
     </main>
+
+    <div class="ledger-mount" id="ledger-fabric" role="region" aria-label="Firmware trust ledger">
+      <div id="ledger-root"><p class="history-empty">Connecting to the trust ledger...</p></div>
+    </div>
   </div>
 
   <script src="{{ url_for('static', filename='app.js') }}"></script>
+  <script type="module" src="{{ url_for('static', filename='ledger-dashboard/assets/ledger-dashboard.js') }}"></script>
 
-  <!-- Lenis for smooth scrolling -->
-  <script src="https://unpkg.com/@studio-freight/lenis@1.0.34/dist/lenis.min.js"></script>
-  <script>
-    if (typeof Lenis !== 'undefined') {
-      const lenis = new Lenis({
-        lerp: 0.08,           // exponential-decay lerp — Apple-style inertia
-        smoothWheel: true,
-        smoothTouch: false,   // keep native momentum on trackpad/touch
-      });
-
-      function raf(time) {
-        lenis.raf(time);
-        requestAnimationFrame(raf);
-      }
-
-      requestAnimationFrame(raf);
-    }
-  </script>
 </body>
 </html>

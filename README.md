@@ -1,14 +1,153 @@
 # HexWarden
 
-**Firmware trojan / malware detection toolkit for embedded and power-sector devices.**
-Built for Smart India Hackathon 2026 — problem statement **SIH1387: Detection of
-Embedded Malware/Trojan in Hardware Devices (Power Sector)**.
+## Firmware Trust DLT POC
 
-Malware hidden in power-sector hardware firmware sits below the OS, invisible to
-antivirus, and can trigger blackouts on command — Industroyer did exactly this to
-Ukraine's power grid in 2016. HexWarden runs a firmware image through several
-independent detection layers and combines their findings into one scored verdict.
-No single signal issues a verdict on its own.
+This repository now includes an additive proof of concept for a HexWarden
+Firmware Trust Distributed Ledger Technology (DLT) network. The existing
+Python HexWarden analyzer remains the malware-analysis system; the DLT layer
+records attestations made after that analysis. Blockchain does not detect
+malware and does not make firmware inherently secure.
+
+```mermaid
+flowchart LR
+  FW[Firmware bytes] --> H[HexWarden analysis]
+  H --> V{CLEAN?}
+  V -- no --> R[Reject update]
+  V -- yes --> S[SHA-256]
+  S --> C[Solidity FirmwareRegistry]
+  C --> Q[QBFT validators]
+  Q --> L[Shared Besu ledger]
+  L --> E[ESP32 Query]
+  E --> A[Accept or reject update]
+```
+
+The prototype uses Hyperledger Besu with QBFT, Solidity/OpenZeppelin,
+Hardhat, Node.js/TypeScript, ethers.js, Docker Compose, and a standard-library
+Python scanner adapter. The four local containers represent Vendor, Security
+Laboratory, Utility, and CSIRT roles. They are not genuinely independent
+organizations on one laptop; a real deployment would place validators under
+separate administrative domains.
+
+### What is stored where
+
+- HexWarden keeps analysis inputs, findings, YARA/entropy/golden-image/Binwalk
+  evidence, and reports off-chain.
+- SHA-256 identifies the exact firmware bytes.
+- `FirmwareRegistry` stores the hash, device model, version, attester,
+  timestamp, and current approval state on-chain.
+- QBFT provides permissioned validator agreement and an auditable history.
+- Governance controls which accounts can approve and revoke.
+- The ESP32 is the final enforcement point: it accepts only an approved hash
+  for its device model.
+
+### POC layout
+
+`blockchain/` contains the four-node Compose network and generated validator
+configuration. `contracts/` contains the role-controlled registry and tests.
+`backend/` exposes ethers-backed API routes. `trust_adapter/` adapts the existing
+Python pipeline and computes the real file hash. `esp32-simulator/` models the
+device decision. `dashboard/` is an optional Vite view of validator status and
+ledger lookups.
+
+### Run the complete local demo
+
+Prerequisites: Docker Desktop, Node.js 20+, npm, and Python 3.9+. The Docker
+network is intentionally local and uses chain ID 1337.
+
+```bash
+cp .env.example .env
+./scripts/start.sh
+cd contracts && npm install && npm run compile && npm run deploy
+cd ../backend && npm install && npm run build
+```
+
+Set the backend environment from the repository root before starting it:
+
+```bash
+export BESU_RPC_URL=http://127.0.0.1:8545
+export DEPLOYER_PRIVATE_KEY=30389ef71a9f24675e4eb0f7c761a1b8c56fb21883a98a3cd8582585e4b7b1d8
+export DEPLOYMENT_FILE="$PWD/contracts/deployment.json"
+export HEXWARDEN_ROOT="$PWD"
+cd backend && npm start
+```
+
+In another terminal:
+
+```bash
+cd dashboard && npm install && npm run build
+cd .. && python3 web/run.py
+python3 esp32-simulator/simulator.py firmware/clean.bin
+python3 esp32-simulator/simulator.py firmware/trojan.bin
+```
+
+The ledger activity audit records real status polls, validator responses, and
+firmware lookups in the current browser session. It refreshes network status
+every 12 seconds while the ledger page is open.
+
+Attest clean firmware, then query it and revoke it:
+
+```bash
+curl -F firmware=@firmware/clean.bin -F deviceModel=ESP32-X -F version=2.1 \
+  http://127.0.0.1:4000/api/firmware/approve
+# Copy the returned hash.
+curl http://127.0.0.1:4000/api/firmware/HASH
+curl -X POST http://127.0.0.1:4000/api/firmware/HASH/revoke
+python3 esp32-simulator/simulator.py firmware/clean.bin
+```
+
+The first simulator run is `APPROVED`; the trojan binary has a different
+SHA-256 and is `NOT APPROVED`; after revocation the clean binary is `REVOKED`.
+The original approval transaction and `FirmwareApproved` event remain in the
+ledger history.
+
+`./scripts/demo.sh` prints the same flow and the exact curl commands. Stop the
+validators with `./scripts/stop.sh`. The generated validator identities live in
+`blockchain/generated/` and are intentionally ignored as local runtime data.
+
+### API
+
+- `POST /api/firmware/analyze` accepts multipart field `firmware`.
+- `POST /api/firmware/approve` accepts `firmware`, `deviceModel`, and `version`.
+  It reruns HexWarden and refuses anything other than `CLEAN` before sending a
+  contract transaction.
+- `GET /api/firmware/:hash` reads the contract record.
+- `POST /api/firmware/:hash/revoke` sends a revocation transaction.
+- `GET /api/blockchain/status` reports chain ID, latest block, contract
+  address, and reachability of all configured RPC endpoints.
+
+### Tests and limitations
+
+```bash
+cd contracts && npm test
+cd ../ && python3 -m pytest tests/ -v
+```
+
+The Solidity suite covers approval, role rejection, revocation, unknown
+hashes, and governance role management. The integration path is the Compose
+startup, Hardhat deployment, API approval, simulator lookup, and API
+revocation sequence above. It requires Docker and therefore cannot run in a
+Python-only environment. The sample Python scanner is deliberately modular:
+the existing pipeline is reused, while YARA, entropy, golden-image, and
+Binwalk remain the repository's analyzers and are not silently represented as
+fully implemented new modules.
+
+---
+
+**Firmware trojan / malware detection toolkit for embedded devices, with a
+blockchain-backed firmware-trust layer.**
+Built for Smart India Hackathon 2026 — problem statement **SIH26211 (AICTE Student
+Innovation)** · Theme: **Blockchain & Cybersecurity** · Category: **Hardware**.
+
+Malware hidden in device firmware sits below the OS, invisible to antivirus, and
+can act on command — Industroyer did exactly this to Ukraine's power grid in 2016.
+HexWarden runs a firmware image through several independent detection layers and
+combines their findings into one scored verdict; no single signal issues a verdict
+on its own. A permissioned distributed ledger then records the attestation of what
+was analysed, by whom, and its current approval state — and an ESP32 enforces it,
+accepting only an approved firmware hash for its device model.
+
+The engine is firmware-agnostic: it works on any firmware image regardless of
+vendor, architecture, or sector (power, healthcare, transport, telecom, defence).
 
 ## Detection layers
 
@@ -244,6 +383,23 @@ development; see commit `31272fa` ("Fix entropy false-positive/non-determinism")
 For a **scored** side-by-side, upload both images to the [web dashboard](#web-dashboard)
 and use **Compare Selected** on the two history rows.
 
+### Results
+
+Blind evaluation: _N_ clean firmware images and _M_ injected variants across five
+attack types — appended encrypted blob, backdoor UID-0 account, pre-installed SSH
+key, init/cron persistence dropper, and a patched binary with a hardcoded C2. The
+injections were generated by a team member who did not write the detection modules.
+
+| Metric | Result |
+|---|---|
+| Detection rate (injected) | _X_ / _M_ |
+| False positives (clean) | _Y_ / _N_ |
+| Median analysis time | ~_T_ s per image |
+| Validated firmware families | OpenWrt, DD-WRT, ESP32 |
+
+<!-- Fill X, Y, T, N, M after running the benchmark. Report misses honestly and
+note which detection layer covers each. Measured numbers beat claims. -->
+
 ### Known Limitations — Entropy Detection
 
 Shannon entropy on small windows (256 bytes) has statistical bias: true random data
@@ -299,33 +455,12 @@ See `tests/test_firmware_pipeline.py`'s `_MAX_ENTROPY_BLOB` for the exact
 byte-permutation-blob pattern used by the automated test suite, which correctly
 avoids the `os.urandom()` small-window bias described above.
 
-## Project Layout
 
-```
-main.py                        CLI entry point (runs modules, prints findings)
-config.py                      all tunable thresholds / weights
-config/string_patterns.json    editable string-pattern library
-core/
-  scoring.py                   weighted verdict aggregation (used by the dashboard)
-modules/
-  entropy.py                   Shannon entropy + local contrast
-  firmware_pipeline.py         Binwalk extract + raw/extracted entropy + raw YARA/strings + filesystem
-  binwalk_wrapper.py           Binwalk backend abstraction (subprocess / Python API)
-  golden_diff.py               content-defined-chunking diff (Mode A)
-  yara_engine.py               YARA wrapper + clean-baseline suppression
-  filesystem.py                extracted-filesystem forensics
-  strings.py                   string extraction + pattern matching
-  dynamic/network_monitor.py   pcap C2 / beacon / DNS-tunnel analysis
-rules/                         YARA rule sets (ICS protocols, backdoors, packers, crypto, persistence, …)
-web/                           Flask dashboard — app.py, database.py, run.py, templates/, static/
-tests/                         pytest suite (44 tests)
-docs/                          architecture.md, usage.md, rule_writing.md
-```
 
 ## Team
 
 **HexWarden** — Thapar Institute of Engineering & Technology
-SIH1387 · Theme: Blockchain & Cybersecurity · Category: Hardware
+SIH26211 · Theme: Blockchain & Cybersecurity · Category: Hardware
 <https://github.com/varun935/HexWarden>
 
 | Member | Role |
@@ -333,6 +468,6 @@ SIH1387 · Theme: Blockchain & Cybersecurity · Category: Hardware
 | Varun Chaitenya Sharma | Team Lead, Core Architecture, Reverse Engineering |
 | Tejas Wasan | YARA Engine, String Analysis |
 | Dhairya Mittal | Hardware, Side-Channel Analysis |
-| Aaryan Joshi | Hardware, Firmware Extraction |
+| Aaryan Joshi | DLT Implementation, Frontend |
 | Viresh Arora | Report Generation, Testing |
 | Jayana Sapra | Documentation, Scoring Engine |

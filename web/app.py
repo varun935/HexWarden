@@ -32,13 +32,19 @@ Outputs:
     and an SSE progress stream per scan.
 """
 
+import hashlib
 import json
 import logging
+import os
 import queue
 import shutil
 import sqlite3
+import subprocess
+import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 import uuid
 from dataclasses import asdict
 from pathlib import Path
@@ -50,6 +56,7 @@ from flask import (
     abort,
     jsonify,
     render_template,
+    redirect,
     request,
     send_file,
     stream_with_context,
@@ -80,6 +87,16 @@ _scan_queues: Dict[str, "queue.Queue"] = {}
 _scan_queues_lock = threading.Lock()
 
 _YARA_RULES_DIR = config.PROJECT_ROOT / "rules"
+_DEVICE_SIMULATOR = config.PROJECT_ROOT / "esp32-simulator" / "simulator.py"
+
+
+def _sha256_file(path: Path) -> str:
+    """Hash a firmware image without loading the whole file into memory."""
+    digest = hashlib.sha256()
+    with path.open("rb") as firmware:
+        for chunk in iter(lambda: firmware.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _get_queue(scan_id: str) -> "queue.Queue":
@@ -346,6 +363,38 @@ def dashboard():
     return render_template("index.html", active_page="dashboard")
 
 
+def _proxy_ledger_read(path: str):
+    """Proxy a read-only ledger API request to the loopback DLT backend."""
+    api_url = os.environ.get("DLT_API_URL", "http://127.0.0.1:4000").rstrip("/")
+    query = request.query_string.decode("ascii")
+    url = f"{api_url}{path}" + (f"?{query}" if query else "")
+    api_request = urllib.request.Request(url, headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(api_request, timeout=8) as response:
+            return Response(response.read(), status=response.status, content_type="application/json")
+    except urllib.error.HTTPError as error:
+        return Response(error.read(), status=error.code, content_type="application/json")
+    except (urllib.error.URLError, TimeoutError, OSError) as error:
+        logger.warning("Ledger API proxy request failed: %s", error)
+        return jsonify({"error": "Ledger API is unavailable. Start the DLT backend."}), 503
+
+
+@app.route("/api/blockchain/status")
+def ledger_status_proxy():
+    return _proxy_ledger_read("/api/blockchain/status")
+
+
+@app.route("/api/audit")
+def ledger_audit_proxy():
+    return _proxy_ledger_read("/api/audit")
+
+
+@app.route("/api/firmware/<hash_value>")
+def firmware_ledger_proxy(hash_value: str):
+    return _proxy_ledger_read(f"/api/firmware/{hash_value}")
+
+
+
 @app.route("/about")
 def about():
     """Render the about/team page."""
@@ -403,6 +452,7 @@ def start_scan():
         scan_id,
         firmware_filename,
         firmware_path.stat().st_size,
+        firmware_sha256=_sha256_file(firmware_path),
         has_golden=golden_path is not None,
         has_pcap=pcap_path is not None,
     )
@@ -416,6 +466,11 @@ def start_scan():
 
     return jsonify({"scan_id": scan_id, "redirect": f"/scan/{scan_id}"})
 
+
+@app.route("/ledger")
+def ledger_dashboard():
+    """Keep the legacy ledger URL pointed at its section in the main dashboard."""
+    return redirect("/dashboard#ledger-fabric")
 
 @app.route("/scan/<scan_id>")
 def scan_detail(scan_id: str):
@@ -499,11 +554,48 @@ def scan_report(scan_id: str):
         abort(404)
 
     report = dict(scan)
+    report["firmware_sha256"] = scan.get("firmware_sha256")
     report["findings"] = json.loads(scan["findings_json"]) if scan["findings_json"] else []
     report["score"] = json.loads(scan["score_json"]) if scan["score_json"] else None
     del report["findings_json"]
     del report["score_json"]
     return jsonify(report)
+
+
+@app.route("/scan/<scan_id>/device-check", methods=["POST"])
+def device_check(scan_id: str):
+    """Run the analyzed image's saved digest through the ESP32 simulator."""
+    scan = database.get_scan(scan_id)
+    if scan is None:
+        abort(404)
+    if scan["status"] != "complete":
+        return jsonify({"error": "Firmware analysis must complete before the device check."}), 409
+    if not scan.get("firmware_sha256"):
+        return jsonify({"error": "This scan predates device-check support. Analyze the firmware again."}), 409
+
+    try:
+        result = subprocess.run(
+            [sys.executable, str(_DEVICE_SIMULATOR), "--hash", scan["firmware_sha256"], "--json"],
+            cwd=str(config.PROJECT_ROOT),
+            env={**os.environ, "HEXWARDEN_BACKEND": os.environ.get("HEXWARDEN_BACKEND", "http://127.0.0.1:4000")},
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        logger.exception("Device simulator failed for scan %s", scan_id)
+        return jsonify({"error": f"Device simulator unavailable: {error}"}), 503
+
+    try:
+        outcome = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        logger.error("Device simulator returned invalid output for scan %s: %s", scan_id, result.stderr)
+        return jsonify({"error": "Device simulator returned an invalid response."}), 502
+
+    if result.returncode == 2 or "error" in outcome:
+        return jsonify(outcome), 503
+    return jsonify(outcome)
 
 
 @app.route("/scan/<scan_id>/plot")

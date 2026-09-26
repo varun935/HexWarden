@@ -1,0 +1,2 @@
+# The trust adapter uses only the Python standard library plus the existing
+# HexWarden installation. Install the repository requirements for the full scan.
