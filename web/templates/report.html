@@ -15,7 +15,7 @@
       href="{{ url_for('static', filename='style.css') }}"
     />
   </head>
-  <body>
+  <body data-scan-id="{{ scan_id }}">
     {% include "_nav.html" %}
     <div class="page">
       <header class="topbar report-topbar">
@@ -185,7 +185,7 @@
       </main>
     </div>
     <script>
-      window.SCAN_ID = {{ scan_id | tojson }};
+      window.SCAN_ID = document.body.dataset.scanId;
     </script>
     <script src="{{ url_for('static', filename='app.js') }}"></script>
   </body>
