@@ -31,7 +31,6 @@ output/
 extractions/
 *.img
 *.bin
-*.png
 *.json
 result.txt
 ses.txt
