@@ -1841,8 +1841,10 @@ section:hover,
 /* ------------------------------------------------------------------ */
 @media (max-width: 860px) {
   .layout {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
+
+  .layout > section { min-width: 0; }
 
   .hero {
     grid-template-columns: 1fr;

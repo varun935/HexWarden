@@ -1,36 +1,119 @@
-import { StrictMode, useEffect, useState } from "react";
+import { FormEvent, StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
 
 const API = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:4000";
 type Status = { blockNumber: number; chainId: number; contractAddress: string; connectedNodes: { url: string; online: boolean }[] };
+type FirmwareRecord = { hash: string; deviceModel: string; version: string; attester: string; timestamp: number; approved: boolean };
 type ApiError = { error: string };
+type AuditEntry = { id: number; at: string; kind: "request" | "success" | "warning" | "error"; message: string };
+
+const validatorNames = ["Vendor", "Security Laboratory", "Utility", "CSIRT"];
 
 function App() {
   const [status, setStatus] = useState<Status>();
   const [statusError, setStatusError] = useState<string>();
   const [hash, setHash] = useState("");
-  const [record, setRecord] = useState<any>();
+  const [record, setRecord] = useState<FirmwareRecord | ApiError>();
+  const [querying, setQuerying] = useState(false);
+  const [audit, setAudit] = useState<AuditEntry[]>([]);
+
+  function addAudit(kind: AuditEntry["kind"], message: string) {
+    setAudit((entries) => [{ id: Date.now(), at: new Date().toISOString(), kind, message }, ...entries].slice(0, 60));
+  }
+
   useEffect(() => {
-    fetch(`${API}/api/blockchain/status`)
-      .then(async (response) => {
+    let active = true;
+    let nextId = 0;
+    const log = (kind: AuditEntry["kind"], message: string) => {
+      if (!active) return;
+      setAudit((entries) => [{ id: nextId++, at: new Date().toISOString(), kind, message }, ...entries].slice(0, 60));
+    };
+    const refreshStatus = async () => {
+      log("request", "Fetching blockchain status from Besu RPC endpoints");
+      try {
+        const response = await fetch(`${API}/api/blockchain/status`);
         const body = await response.json() as Status | ApiError;
-        if (!response.ok) throw new Error("error" in body ? body.error : "Blockchain status unavailable");
-        setStatus(body as Status);
-      })
-      .catch((error: Error) => setStatusError(error.message));
+        if (!response.ok || "error" in body) throw new Error("error" in body ? body.error : "Blockchain status unavailable");
+        if (!active) return;
+        setStatus(body);
+        setStatusError(undefined);
+        const online = body.connectedNodes.filter((node) => node.online).length;
+        log(online === body.connectedNodes.length ? "success" : "warning", `Block ${body.blockNumber} received; ${online}/${body.connectedNodes.length} validators responding`);
+        body.connectedNodes.forEach((node, index) => {
+          if (!node.online) log("warning", `${validatorNames[index] ?? "Validator"} RPC is unreachable at ${node.url}`);
+        });
+      } catch (error) {
+        if (!active) return;
+        const message = error instanceof Error ? error.message : "Blockchain status unavailable";
+        setStatusError(message);
+        log("error", `Blockchain status request failed: ${message}`);
+      }
+    };
+    void refreshStatus();
+    const timer = window.setInterval(() => void refreshStatus(), 12000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
   }, []);
-  async function check() {
+
+  async function check(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     if (!hash) return;
-    const response = await fetch(`${API}/api/firmware/${hash}`);
-    setRecord(await response.json());
+    const normalizedHash = hash.trim().replace(/^0x/i, "");
+    setQuerying(true);
+    setRecord(undefined);
+    addAudit("request", `Fetching firmware record ${normalizedHash.slice(0, 12)}… from blockchain`);
+    try {
+      const response = await fetch(`${API}/api/firmware/${normalizedHash}`);
+      const body = await response.json() as FirmwareRecord | ApiError;
+      if (!response.ok) {
+        const message = "error" in body ? body.error : `Ledger query returned HTTP ${response.status}`;
+        setRecord({ error: message });
+        addAudit(response.status === 404 ? "warning" : "error", `Firmware lookup: ${message}`);
+        return;
+      }
+      setRecord(body as FirmwareRecord);
+      const result = body as FirmwareRecord;
+      addAudit(result.approved ? "success" : "warning", `Ledger record found: ${result.approved ? "approved" : "revoked"}, ${result.deviceModel} ${result.version}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Firmware lookup failed";
+      setRecord({ error: message });
+      addAudit("error", `Firmware lookup failed: ${message}`);
+    } finally {
+      setQuerying(false);
+    }
   }
   const nodes = status?.connectedNodes ?? [];
-  return <main><header><p className="eyebrow">HEXWARDEN / TRUST FABRIC</p><h1>Firmware Registry</h1><p className="lede">A shared attestation ledger for firmware that passed HexWarden analysis.</p></header>
-    {statusError && <p className="api-error">Blockchain status unavailable. Start Besu and deploy the contract, then reload this page.</p>}
-    <section className="grid"><article><h2>Validators</h2>{["Vendor", "Security Laboratory", "Utility", "CSIRT"].map((name, i) => <div className="validator" key={name}><span>{name}</span><b className={nodes[i]?.online ? "online" : "unknown"}>● {nodes[i]?.online ? "ONLINE" : "OFFLINE"}</b></div>)}</article>
-      <article><h2>Consensus</h2><strong className="consensus">QBFT</strong><p>Latest block <b>{status?.blockNumber ?? "--"}</b></p><p>Chain ID <b>{status?.chainId ?? "--"}</b></p></article></section>
-    <section className="lookup"><h2>Check firmware</h2><div><input value={hash} onChange={(e) => setHash(e.target.value)} placeholder="SHA-256 hash"/><button onClick={check}>Query ledger</button></div>{record && <pre>{JSON.stringify(record, null, 2)}</pre>}</section>
-  </main>;
+  return <div className="ledger-workspace">
+    <div className="ledger-heading">
+      <div><p className="ledger-eyebrow">TRUST FABRIC / LIVE NETWORK</p><h2>Firmware ledger</h2><p>Attestations and validator health for firmware cleared by HexWarden analysis.</p></div>
+      <a href="#upload-card">Analyze firmware</a>
+    </div>
+    {statusError && <p className="ledger-error" role="status">Blockchain status unavailable: {statusError}</p>}
+    <div className="ledger-overview">
+      <article className="ledger-panel">
+        <div className="ledger-panel-heading"><h3>Validators</h3><span className="ledger-live"><i /> LIVE</span></div>
+        {validatorNames.map((name, index) => <div className="ledger-validator" key={name}><span>{name}</span><b className={nodes[index]?.online ? "is-online" : "is-offline"}>● {nodes[index]?.online ? "ONLINE" : status ? "OFFLINE" : "CHECKING"}</b></div>)}
+      </article>
+      <article className="ledger-panel ledger-chain">
+        <h3>QBFT network</h3>
+        <div className="ledger-stats"><div><span>Latest block</span><strong>{status?.blockNumber ?? "--"}</strong></div><div><span>Chain ID</span><strong>{status?.chainId ?? "--"}</strong></div></div>
+        <p className="ledger-contract">Registry <code>{status?.contractAddress ?? "Waiting for RPC"}</code></p>
+      </article>
+    </div>
+    <div className="ledger-activity-grid">
+      <section className="ledger-panel ledger-lookup">
+        <h3>Verify firmware record</h3>
+        <form onSubmit={check}><input value={hash} onChange={(event) => setHash(event.target.value)} placeholder="SHA-256 hash" aria-label="Firmware SHA-256 hash"/><button type="submit" disabled={querying || !hash.trim()}>{querying ? "Fetching…" : "Query ledger"}</button></form>
+        {record && <pre className="ledger-record">{JSON.stringify(record, null, 2)}</pre>}
+      </section>
+      <section className="ledger-panel ledger-audit" aria-labelledby="ledger-audit-title">
+        <div className="ledger-panel-heading"><h3 id="ledger-audit-title">Activity audit</h3><span>SESSION LOG</span></div>
+        <ol className="ledger-audit-list" aria-live="polite">{audit.length ? audit.map((entry) => <li className={`ledger-audit-entry ${entry.kind}`} key={entry.id}><time dateTime={entry.at}>{new Date(entry.at).toLocaleTimeString()}</time><span>{entry.message}</span></li>) : <li className="ledger-audit-empty">Waiting for first network request</li>}</ol>
+      </section>
+    </div>
+  </div>;
 }
-createRoot(document.getElementById("root")!).render(<StrictMode><App /></StrictMode>);
+createRoot(document.getElementById("ledger-root")!).render(<StrictMode><App /></StrictMode>);

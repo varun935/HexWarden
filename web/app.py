@@ -50,6 +50,7 @@ from flask import (
     abort,
     jsonify,
     render_template,
+    redirect,
     request,
     send_file,
     stream_with_context,
@@ -346,6 +347,7 @@ def dashboard():
     return render_template("index.html", active_page="dashboard")
 
 
+
 @app.route("/about")
 def about():
     """Render the about/team page."""
@@ -416,6 +418,11 @@ def start_scan():
 
     return jsonify({"scan_id": scan_id, "redirect": f"/scan/{scan_id}"})
 
+
+@app.route("/ledger")
+def ledger_dashboard():
+    """Keep the legacy ledger URL pointed at its section in the main dashboard."""
+    return redirect("/dashboard#ledger-fabric")
 
 @app.route("/scan/<scan_id>")
 def scan_detail(scan_id: str):

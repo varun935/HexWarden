@@ -74,10 +74,15 @@ cd backend && npm start
 In another terminal:
 
 ```bash
-cd dashboard && npm install && npm run dev
+cd dashboard && npm install && npm run build
+cd .. && python3 web/run.py
 python3 esp32-simulator/simulator.py firmware/clean.bin
 python3 esp32-simulator/simulator.py firmware/trojan.bin
 ```
+
+The ledger activity audit records real status polls, validator responses, and
+firmware lookups in the current browser session. It refreshes network status
+every 12 seconds while the ledger page is open.
 
 Attest clean firmware, then query it and revoke it:
 
@@ -459,6 +464,6 @@ SIH1387 · Theme: Blockchain & Cybersecurity · Category: Hardware
 | Varun Chaitenya Sharma | Team Lead, Core Architecture, Reverse Engineering |
 | Tejas Wasan | YARA Engine, String Analysis |
 | Dhairya Mittal | Hardware, Side-Channel Analysis |
-| Aaryan Joshi | Hardware, Firmware Extraction |
+| Aaryan Joshi | DLT Implementation, Frontend |
 | Viresh Arora | Report Generation, Testing |
 | Jayana Sapra | Documentation, Scoring Engine |
